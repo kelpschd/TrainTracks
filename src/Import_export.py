@@ -12,18 +12,21 @@ print(f"Found {len(images)} ND2 files")
 
 nd2_path = images[0]
 zarr_path = nd2_path.with_suffix('.zarr').name
-print(zarr_path)
 
 store = zarr.storage.LocalStore(zarr_path) 
 root = zarr.group(store, overwrite=True)
 
 with nd2.ND2File(nd2_path) as f:
     arr = f.asarray()
-    print(f"Shape: {arr.shape}")
+    print(zarr_path)
+    print(f"Array shape: {arr.shape}")
+    print(f"Array dtype: {arr.dtype}")
+    print(f"Array min: {arr.min} and max: {arr.max}")
 
-    # pixel conversion information - verify this is the correct value
+    # report micron per pixel on each axis
     px = f.metadata.channels[0].volume.axesCalibration
-    print(px)
+    print(f"The image is {px[0]} micrometers per pixel on Y")
+    print(f"The image is {px[1]} micrometers per pixel on X")
     
     write_image(
         image=arr,
@@ -36,3 +39,4 @@ with nd2.ND2File(nd2_path) as f:
     )
 
     print("Zarr'd")
+
