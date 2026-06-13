@@ -23,4 +23,5 @@ dependencies = [
     "motile",
     "motile-plugin",
     "traccuracy",
+    "pathlib"
 ]
