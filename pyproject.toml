@@ -17,5 +17,10 @@ authors = [
 ]
 dynamic = ["version"]
 dependencies = [
-    # Add your requirements here
+    "opencv-python",
+    "zarr",
+    "nd2",
+    "motile",
+    "motile-plugin",
+    "traccuracy",
 ]
