@@ -2,6 +2,7 @@ import nd2
 import zarr
 from pathlib import Path
 import ome_zarr
+import numpy as np
 from ome_zarr.io import parse_url
 from ome_zarr.writer import write_image
 
@@ -21,7 +22,7 @@ with nd2.ND2File(nd2_path) as f:
     print(zarr_path)
     print(f"Array shape: {arr.shape}")
     print(f"Array dtype: {arr.dtype}")
-    print(f"Array min: {arr.min} and max: {arr.max}")
+    print(f"Array min: {arr[0,0].min()} and max: {arr[0,0].max()}")
 
     # report micron per pixel on each axis
     px = f.metadata.channels[0].volume.axesCalibration
@@ -37,6 +38,11 @@ with nd2.ND2File(nd2_path) as f:
             [{"type": "scale", "scale": [1.0, 1.0, px[0], px[1]]}]
         ],
     )
-
     print("Zarr'd")
 
+z_array = zarr.open('/home/S-DK/TrainTracks/sg100_Well1_1001.zarr', mode='r')
+np_array = np.asarray(z_array['s0'])
+
+print(f"Zarr shape: {np_array.shape}")
+print(f"Zarr dtype: {np_array.shape}")
+print(f"Array min: {np_array[0,0].min()} and max: {np_array[0,0].max()}")
