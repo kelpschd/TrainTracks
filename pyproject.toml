@@ -23,5 +23,6 @@ dependencies = [
     "motile",
     "motile-plugin",
     "traccuracy",
-    "pathlib"
+    "pathlib",
+    "ome-zarr"
 ]
