@@ -1,0 +1,18 @@
+{
+  "template": "https://github.com/dlmbl/example-project",
+  "commit": "76ce2756564bab583fb14ae2d21951ae5a35f9b6",
+  "checkout": null,
+  "context": {
+    "cookiecutter": {
+      "full_name": "Dan Kelpsch",
+      "email": "kelpschd@gmail.com",
+      "project_name": "TrainTracks",
+      "project_slug": "TrainTracks",
+      "project_short_description": "Tracking particle",
+      "default_python": "3.11",
+      "_template": "https://github.com/dlmbl/example-project",
+      "_commit": "76ce2756564bab583fb14ae2d21951ae5a35f9b6"
+    }
+  },
+  "directory": null
+}
