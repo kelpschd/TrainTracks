@@ -74,10 +74,10 @@ for i in tqdm(range(1, arr_norm.shape[0]), desc = "Computing optical flow"):
     # These are the settings that we set up prevously but it would be adventageous 
     # to take the values from a config file
     flow = cv2.calcOpticalFlowFarneback(
-        prev=prev_frame_contrast,
-        next=curr_frame_contrast,
-        prev_flow = None, 
-        pyr_sclae = 0.6,
+        prev = prev_frame_contrast,
+        next = curr_frame_contrast,
+        flow = None, 
+        pyr_scale = 0.6,
         levels=5,
         winsize=15,
         iterations=8,
@@ -94,6 +94,8 @@ for i in tqdm(range(1, arr_norm.shape[0]), desc = "Computing optical flow"):
 
     prev_frame = curr_frame
     prev_flow = flow
+
+
 
 # There is some frame averaging with Jens script, but we can remove that
 
