@@ -27,8 +27,19 @@ np_arr = np_arr[:, 0]
 print(np_arr.shape)
 
 print("Generating empty output zarr")
-output_zarr = zarr.zeros(np_arr.shape, dtype=np_arr.dtype, chunks=(1, 2048, 2048))
-print(np.array(output_zarr).shape)
+# output_zarr = zarr.zeros(np_arr.shape, dtype=np_arr.dtype, chunks=(1, 2048, 2048))
+
+# ^ this would work find but focuses you to hold the entire zarr in RAM and just defeats the purpose of zarr (kinda)
+T, Y, X = np_arr.shape
+output_zarr = zarr.open_array(
+    'flow.zarr',
+    mode='w',
+    shape=(T, Y, X, 2), # need 2 at the end because there are flows for X and flows for Y!
+    dtype=np.float32,
+    chunks=(1, Y, X, 2)
+)
+print(f"The output_zarr shape is: {output_zarr.shape}")
+print(f"The output_zarr type is: {type(output_zarr)}")
 
 # Normalize img using min and max values from the img
 # was i suppose to do this for each frame? I dont think so
@@ -59,7 +70,9 @@ print("The first frame has enhanced contrast")
 # Set up for previous flow
 prev_flow = None
 
-
+# Open loop
+#     get next frame, enhance its contrast, and start flow against previous frame 
+#         flow: *calcOpticalFlowFarneback* OR *calcOpticalFlowPyrLK*
 
 # open loop to iterate through each frame of the time series
 for i in tqdm(range(1, arr_norm.shape[0]), desc = "Computing optical flow"):
@@ -92,22 +105,9 @@ for i in tqdm(range(1, arr_norm.shape[0]), desc = "Computing optical flow"):
         temporal_smoothing_sigma = 0.7 
         flow = temporal_smoothing_sigma * flow + (1 - temporal_smoothing_sigma) * prev_flow
 
-    prev_frame = curr_frame
+    prev_frame_contrast = curr_frame_contrast
     prev_flow = flow
 
+    output_zarr[i-1] = flow.astype(np.float32)
 
-
-# There is some frame averaging with Jens script, but we can remove that
-
-# Open loop
-#     get next frame, enhance its contrast, and start flow against previous frame 
-#         flow: *calcOpticalFlowFarneback* OR *calcOpticalFlowPyrLK*
-
-
-# write this to a png just to verity that it doesn't look super weird
-
-
-# add empty frame to end of flow time series
-# output zarr
-# write zarr
-
+print(output_zarr)
