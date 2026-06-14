@@ -17,7 +17,10 @@ images_dir = Path("/mnt/efs/dl_jrc/student_data/S-DK/Sphere/220725_i11w-hT-M33-I
 images = list(sorted(images_dir.glob('*.zarr')))
 print(f"Found {len(images)} zarr files")
 
-zarr_root = zarr.open(images[0], mode = 'r')
+img_num = 9
+
+print(images[img_num].name)
+zarr_root = zarr.open(images[img_num], mode = 'r')
 arr = zarr_root['s0']
 np_arr = np.array(arr)
 print(np_arr.shape)
