@@ -107,25 +107,19 @@ def generate_flow_frames(flow_zarr, scale_factor=0.1, color_wheel=False):
     for i in tqdm(range(T), desc="Generating flow visualization frames"):
         flow_frame = generate_flow_frame(flow_raw[i], scale_factor=scale_factor)
         flow_frames[i, ...] = flow_frame
-        
-        print(flow_frames.shape)
 
     # Add color wheel legend
-    # if color_wheel:
-    #     legend = create_flow_color_wheel(X, Y)
-    #     legend_h, legend_w = legend.shape[:2]
+    if color_wheel:
+        legend = create_flow_color_wheel(X, Y)
+        legend_h, legend_w = legend.shape[:2]
 
-    #     # position in bottom right
-    #     pos_x = X - legend_w
-    #     pos_y = Y - legend_h
+        # position in bottom right
+        pos_x = X - legend_w
+        pos_y = Y - legend_h
 
-    #     print(flow_frames.shape)
-    #     print(legend.shape)
-
-    #     flow_frames[:, pos_y:pos_y+legend_h, pos_x:pos_x+legend_w, :] = legend
+        flow_frames[:, pos_y:pos_y+legend_h, pos_x:pos_x+legend_w, :] = legend
 
     flow_zarr['flow_frames_XY'][:] = flow_frames
-
 
 # load in flow.zarr
 flow_path = Path("/home/S-DK/TrainTracks/flow.zarr")
@@ -134,7 +128,8 @@ flow_raw = flow_root['flow_raw']
 np_flow = np.array(flow_raw)
 print(np_flow.shape)
 
-# generate_flow_frames(flow_root, scale_factor=1, color_wheel=True)
+# set up if statement to see if flow_frames_XY is there
+generate_flow_frames(flow_root, scale_factor=0.1, color_wheel=True)
 
 flow_frames_test = flow_root['flow_frames_XY']
 print(f"flow frames XY is shape: {np.array(flow_frames_test).shape}")
