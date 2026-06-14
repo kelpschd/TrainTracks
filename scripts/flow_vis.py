@@ -106,6 +106,8 @@ def generate_flow_frames(flow_zarr, scale_factor=0.1, color_wheel=False):
     for i in tqdm(range(T), desc="Generating flow visualization frames"):
         flow_frame = generate_flow_frame(flow_raw[i], scale_factor=scale_factor)
         flow_frames[i, ...] = flow_frame
+        
+        print(flow_frames.shape)
 
     # Add color wheel legend
     # if color_wheel:
@@ -131,8 +133,10 @@ flow_raw = flow_root['flow_raw']
 np_flow = np.array(flow_raw)
 print(np_flow.shape)
 
-flow_frames = generate_flow_frames(flow_root, scale_factor=1, color_wheel=True)
-print(flow_frames)
+# generate_flow_frames(flow_root, scale_factor=1, color_wheel=True)
+
+flow_frames_test = flow_root['flow_frames_XY']
+print(f"flow frames XY is shape: {np.array(flow_frames_test).shape}")
 
 # import raw img for reference
 images_dir = Path("/mnt/efs/dl_jrc/student_data/S-DK/Sphere/220725_i11w-hT-M33-I76_sg1035_d10sphere")
@@ -147,3 +151,6 @@ np_arr = np.array(arr)
 print(np_arr.shape)
 
 viewer = napari.Viewer()
+viewer.add_image(np_arr[:,0], name = "Raw image")
+viewer.add_image(np.array(flow_frames_test), name = "Flow")
+napari.run()
