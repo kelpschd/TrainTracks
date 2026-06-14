@@ -42,41 +42,14 @@ viewer.add_image(prev_frame, name='Raw')
 # Enhance contrast
 # Jen had a rationale for this kernel size (and clip_limit) before but does not 
 # really remember so double check that the output image looks okay
-kernel_size = [8,8] 
-contrast_test = equalize_adapthist(prev_frame, kernel_size=kernel_size, clip_limit=0.01)
-contrast_test = (contrast_test * 255).astype(np.uint8) #print me to a png as 'enhanced'
-print("The first frame has enhanced contrast")
-viewer.add_image(contrast_test, name='Enhanced 8x8 0.01')
-
-kernel_size = [4,4] 
-contrast_test = equalize_adapthist(prev_frame, kernel_size=kernel_size, clip_limit=0.01)
-contrast_test = (contrast_test * 255).astype(np.uint8) #print me to a png as 'enhanced'
-print("The first frame has enhanced contrast")
-viewer.add_image(contrast_test, name='Enhanced 4x4 0.01')
-
-kernel_size = [2,2] 
-contrast_test = equalize_adapthist(prev_frame, kernel_size=kernel_size, clip_limit=0.01)
-contrast_test = (contrast_test * 255).astype(np.uint8) #print me to a png as 'enhanced'
-print("The first frame has enhanced contrast")
-viewer.add_image(contrast_test, name='Enhanced 2x2 0.01')
-
+# Jen said this looked good for my data - the orginal was 8x8 and we can change back to that if needed
 kernel_size = [16,16] 
 contrast_test = equalize_adapthist(prev_frame, kernel_size=kernel_size, clip_limit=0.01)
 contrast_test = (contrast_test * 255).astype(np.uint8) #print me to a png as 'enhanced'
 print("The first frame has enhanced contrast")
 viewer.add_image(contrast_test, name='Enhanced 16x16 0.01')
 
-kernel_size = [8,8] 
-contrast_test = equalize_adapthist(prev_frame, kernel_size=kernel_size, clip_limit=0.05)
-contrast_test = (contrast_test * 255).astype(np.uint8) #print me to a png as 'enhanced'
-print("The first frame has enhanced contrast")
-viewer.add_image(contrast_test, name='Enhanced 8x8 0.01')
 
-kernel_size = [8,8] 
-contrast_test = equalize_adapthist(prev_frame, kernel_size=kernel_size, clip_limit=0.1)
-contrast_test = (contrast_test * 255).astype(np.uint8) #print me to a png as 'enhanced'
-print("The first frame has enhanced contrast")
-viewer.add_image(contrast_test, name='Enhanced 8x8 0.1')
 
 
 napari.run()
