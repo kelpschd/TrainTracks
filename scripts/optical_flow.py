@@ -7,6 +7,7 @@
 
 import zarr
 import numpy as np
+import napari
 from pathlib import Path
 from skimage.exposure import equalize_adapthist
 
@@ -17,6 +18,10 @@ print(f"Found {len(images)} zarr files")
 zarr_root = zarr.open(images[0], mode = 'r')
 arr = zarr_root['s0']
 np_arr = np.array(arr)
+print(np_arr.shape)
+
+print("Removing unused channels...")
+np_arr = np_arr[:, 0]
 print(np_arr.shape)
 
 # Normalize img using min and max values from the img
@@ -31,19 +36,58 @@ arr_norm = ((np_arr - min_int_val) / (max_int_val - min_int_val) * 255).astype(n
 print("Computing flow...")
 prev_frame = arr_norm[0] #print me to a png as 'raw'
 
+viewer = napari.Viewer()
+viewer.add_image(prev_frame, name='Raw')
+
 # Enhance contrast
 # Jen had a rationale for this kernel size (and clip_limit) before but does not 
 # really remember so double check that the output image looks okay
 kernel_size = [8,8] 
-prev_frame = equalize_adapthist(prev_frame, kernel_size=kernel_size, clip_limit=0.01)
-prev_frame = (prev_frame * 255).astype(np.uint8)
+contrast_test = equalize_adapthist(prev_frame, kernel_size=kernel_size, clip_limit=0.01)
+contrast_test = (contrast_test * 255).astype(np.uint8) #print me to a png as 'enhanced'
 print("The first frame has enhanced contrast")
+viewer.add_image(contrast_test, name='Enhanced 8x8 0.01')
 
-# write this to a png just to verity that it doesn't look super weird
+kernel_size = [4,4] 
+contrast_test = equalize_adapthist(prev_frame, kernel_size=kernel_size, clip_limit=0.01)
+contrast_test = (contrast_test * 255).astype(np.uint8) #print me to a png as 'enhanced'
+print("The first frame has enhanced contrast")
+viewer.add_image(contrast_test, name='Enhanced 4x4 0.01')
 
+kernel_size = [2,2] 
+contrast_test = equalize_adapthist(prev_frame, kernel_size=kernel_size, clip_limit=0.01)
+contrast_test = (contrast_test * 255).astype(np.uint8) #print me to a png as 'enhanced'
+print("The first frame has enhanced contrast")
+viewer.add_image(contrast_test, name='Enhanced 2x2 0.01')
+
+kernel_size = [16,16] 
+contrast_test = equalize_adapthist(prev_frame, kernel_size=kernel_size, clip_limit=0.01)
+contrast_test = (contrast_test * 255).astype(np.uint8) #print me to a png as 'enhanced'
+print("The first frame has enhanced contrast")
+viewer.add_image(contrast_test, name='Enhanced 16x16 0.01')
+
+kernel_size = [8,8] 
+contrast_test = equalize_adapthist(prev_frame, kernel_size=kernel_size, clip_limit=0.05)
+contrast_test = (contrast_test * 255).astype(np.uint8) #print me to a png as 'enhanced'
+print("The first frame has enhanced contrast")
+viewer.add_image(contrast_test, name='Enhanced 8x8 0.01')
+
+kernel_size = [8,8] 
+contrast_test = equalize_adapthist(prev_frame, kernel_size=kernel_size, clip_limit=0.1)
+contrast_test = (contrast_test * 255).astype(np.uint8) #print me to a png as 'enhanced'
+print("The first frame has enhanced contrast")
+viewer.add_image(contrast_test, name='Enhanced 8x8 0.1')
+
+
+napari.run()
 # Open loop
 #     get next frame, enhance its contrast, and start flow against previous frame 
 #         flow: *calcOpticalFlowFarneback* OR *calcOpticalFlowPyrLK*
+
+
+# write this to a png just to verity that it doesn't look super weird
+
+
 # add empty frame to end of flow time series
 # output zarr
 # write zarr
