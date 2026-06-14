@@ -3,6 +3,7 @@
 
 import cv2
 import zarr
+import napari
 import numpy as np
 from tqdm import tqdm
 from pathlib import Path
@@ -71,25 +72,18 @@ def create_flow_color_wheel(width, height):
 
     return legend
 
-
 def generate_flow_frame(flow, scale_factor=1):
-    depth, height, width, _ = flow.shape
-    hsv = np.zeros((depth, height, width, 3), dtype=np.uint8)  # initialize hsv image
-    hsv[..., 1] = 255  # set saturation to maximum
+    height, width, _ = flow.shape  # ← drop depth
+    hsv = np.zeros((height, width, 3), dtype=np.uint8)
+    hsv[..., 1] = 255
 
-    mag, ang = cv2.cartToPolar(flow[..., 0], flow[..., 1])  # calculate magnitude and angle
-    hsv[..., 0] = ang * 180 / np.pi / 2  # set hue based on angle
-    hsv[..., 2] = np.clip(mag * 255 * scale_factor, 0, 255).astype(np.uint8) # dim = 2550, medium = 25500, bright = 255000
+    mag, ang = cv2.cartToPolar(flow[..., 0], flow[..., 1])
+    hsv[..., 0] = ang * 180 / np.pi / 2
+    hsv[..., 2] = np.clip(mag * 255 * scale_factor, 0, 255).astype(np.uint8)
 
-    rgb = np.zeros_like(hsv, dtype=np.uint8)  # initialize rgb image
-    for zslice in range(depth):
-        rgb[zslice, ...] = cv2.cvtColor(hsv[zslice], cv2.COLOR_HSV2BGR)  # convert hsv to bgr
+    rgb = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)  # ← no loop needed without depth
 
-    # Create a copy of the flow visualization
-    final_frame = rgb.copy()
-
-    return final_frame
-
+    return rgb.copy()
 
 def generate_flow_frames(flow_zarr, scale_factor=0.1, color_wheel=False):
     flow_raw = flow_zarr['flow_raw']
@@ -102,13 +96,18 @@ def generate_flow_frames(flow_zarr, scale_factor=0.1, color_wheel=False):
     # scale_factor = 255.0 / percentile_75
     print(f"Using scale factor for flow visualization: {scale_factor}")
 
-    flow_zarr.create_dataset('flow_frames_XY', shape=(T, Y, X, 2), chunks=(1, Y, X, 2), dtype=np.uint8)
-    flow_frames = np.zeros((T, Y, X, 2), dtype=np.uint8)
-    for i in tqdm(range(T), desc="Generating flow visualization frames"):
-        flow_frame = generate_flow_frame(flow_raw[i, ...], scale_factor=scale_factor)
-        flow_frames[i, ...] = flow_frame
+    flow_frames = flow_zarr.create_array( 
+        'flow_frames_XY',
+        shape=(T, Y, X, 3),   # ← 3 for RGB, not 2
+        chunks=(1, Y, X, 3),
+        dtype=np.uint8
+    )
 
-        # Add color wheel legend
+    for i in tqdm(range(T), desc="Generating flow visualization frames"):
+        flow_frame = generate_flow_frame(flow_raw[i], scale_factor=scale_factor)
+        flow_frames[i] = flow_frame
+
+    # Add color wheel legend
     if color_wheel:
         legend = create_flow_color_wheel(X, Y)
         legend_h, legend_w = legend.shape[:2]
@@ -122,14 +121,26 @@ def generate_flow_frames(flow_zarr, scale_factor=0.1, color_wheel=False):
     flow_zarr['flow_frames_XY'][:] = flow_frames
 
 
+# load in flow.zarr
+flow_path = Path("/home/S-DK/TrainTracks/flow.zarr")
+flow_root = zarr.open_group(flow_path, mode='r+')
+flow_raw = flow_root['flow_raw'] 
+np_flow = np.array(flow_raw)
+print(np_flow.shape)
+
+flow_frames = generate_flow_frames(flow_root, scale_factor=1, color_wheel=True)
+print(flow_frames)
+
 # import raw img for reference
 images_dir = Path("/mnt/efs/dl_jrc/student_data/S-DK/Sphere/220725_i11w-hT-M33-I76_sg1035_d10sphere")
 images = list(sorted(images_dir.glob('*.zarr')))
 print(f"Found {len(images)} zarr files")
 
-zarr_root = zarr.open(images[0], mode = 'r')
+img_num = 9
+print(images[img_num].name)
+zarr_root = zarr.open(images[img_num], mode = 'r')
 arr = zarr_root['s0']
 np_arr = np.array(arr)
 print(np_arr.shape)
 
-import 
+viewer = napari.Viewer()
