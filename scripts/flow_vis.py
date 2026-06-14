@@ -108,18 +108,18 @@ def generate_flow_frames(flow_zarr, scale_factor=0.1, color_wheel=False):
         flow_frames[i, ...] = flow_frame
 
     # Add color wheel legend
-    if color_wheel:
-        legend = create_flow_color_wheel(X, Y)
-        legend_h, legend_w = legend.shape[:2]
+    # if color_wheel:
+    #     legend = create_flow_color_wheel(X, Y)
+    #     legend_h, legend_w = legend.shape[:2]
 
-        # position in bottom right
-        pos_x = X - legend_w
-        pos_y = Y - legend_h
+    #     # position in bottom right
+    #     pos_x = X - legend_w
+    #     pos_y = Y - legend_h
 
-        print(flow_frames.shape)
-        print(legend.shape)
+    #     print(flow_frames.shape)
+    #     print(legend.shape)
 
-        flow_frames[:, pos_y:pos_y+legend_h, pos_x:pos_x+legend_w, :] = legend
+    #     flow_frames[:, pos_y:pos_y+legend_h, pos_x:pos_x+legend_w, :] = legend
 
     flow_zarr['flow_frames_XY'][:] = flow_frames
 
