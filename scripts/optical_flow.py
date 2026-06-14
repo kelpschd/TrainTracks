@@ -34,10 +34,10 @@ print("Generating empty output zarr")
 
 # ^ this would work find but focuses you to hold the entire zarr in RAM and just defeats the purpose of zarr (kinda)
 T, Y, X = np_arr.shape
-output_zarr = zarr.open_array(
-    'flow.zarr',
-    mode='w',
-    shape=(T, Y, X, 2), # need 2 at the end because there are flows for X and flows for Y!
+output_group = zarr.open_group('flow.zarr', mode='w')
+output_zarr = output_group.create_array(
+    'flow_raw',
+    shape=(T, Y, X, 2),
     dtype=np.float32,
     chunks=(1, Y, X, 2)
 )
