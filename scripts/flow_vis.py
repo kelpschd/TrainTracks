@@ -105,7 +105,7 @@ def generate_flow_frames(flow_zarr, scale_factor=0.1, color_wheel=False):
 
     for i in tqdm(range(T), desc="Generating flow visualization frames"):
         flow_frame = generate_flow_frame(flow_raw[i], scale_factor=scale_factor)
-        flow_frames[i] = flow_frame
+        flow_frames[i, ...] = flow_frame
 
     # Add color wheel legend
     if color_wheel:
@@ -116,14 +116,17 @@ def generate_flow_frames(flow_zarr, scale_factor=0.1, color_wheel=False):
         pos_x = X - legend_w
         pos_y = Y - legend_h
 
-        flow_frames[..., pos_y:pos_y+legend_h, pos_x:pos_x+legend_w, :] = legend
+        print(flow_frames.shape)
+        print(legend.shape)
+
+        flow_frames[:, pos_y:pos_y+legend_h, pos_x:pos_x+legend_w, :] = legend
 
     flow_zarr['flow_frames_XY'][:] = flow_frames
 
 
 # load in flow.zarr
 flow_path = Path("/home/S-DK/TrainTracks/flow.zarr")
-flow_root = zarr.open_group(flow_path, mode='r+')
+flow_root = zarr.open_group(flow_path, mode='a')
 flow_raw = flow_root['flow_raw'] 
 np_flow = np.array(flow_raw)
 print(np_flow.shape)
