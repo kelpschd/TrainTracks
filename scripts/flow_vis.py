@@ -96,12 +96,13 @@ def generate_flow_frames(flow_zarr, scale_factor=0.1, color_wheel=False):
     # scale_factor = 255.0 / percentile_75
     print(f"Using scale factor for flow visualization: {scale_factor}")
 
-    flow_frames = flow_zarr.create_array( 
+    flow_zarr.create_array( 
         'flow_frames_XY',
         shape=(T, Y, X, 3),   # ← 3 for RGB, not 2
         chunks=(1, Y, X, 3),
         dtype=np.uint8
     )
+    flow_frames = np.zeros((T, Y, X, 3), dtype=np.uint8)  # ← 3 for RGB
 
     for i in tqdm(range(T), desc="Generating flow visualization frames"):
         flow_frame = generate_flow_frame(flow_raw[i], scale_factor=scale_factor)
