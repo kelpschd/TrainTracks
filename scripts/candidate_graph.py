@@ -4,8 +4,10 @@ import pandas as pd
 # Load in detected spots
 # csv -> numpy array
 blobs_fp = "/mnt/efs/dl_jrc/student_data/S-DK/Sphere/220725_i11w-hT-M33-I76_sg1035_d10sphere/sg100_Well5_1018_blobs.csv"
-blobs = pd.read_csv(blobs_fp)
-print(blobs)
+blobs_df = pd.read_csv(blobs_fp)
+print(blobs_df)
+blobs_np = blobs_df.to_numpy()
+print(blobs_np)
 
 # Generate nodes from "segmentation" - remember this will have to handle blob coords instead of segmentations
 # And build candidate graph
