@@ -59,18 +59,26 @@ cand_graph = nx.DiGraph()
 last_node_id = 0
 
 for frame in range(0, dilated.shape[0]): 
+    # assign labels (per frame)
     segmentation = skimage.measure.label(dilated[frame])
+    # get flows per frame
     flow_frame = flow_arr[frame]
+    # set up the region props
     props = skimage.measure.regionprops(segmentation)
+    # assign last node id
     last_node_id += len(props)
     
     for regionprop in props:
+        # get the node ids
         node_id = int(regionprop.label)
         region = segmentation[frame] == node_id 
+        # pull centroids
         centroid = (float(regionprop.centroid[0]),
                     float(regionprop.centroid[1]))
+        # calc flows
         flow = (float(np.mean(flow_frame[region][:1])),
                 float(np.mean(flow_frame[region][:0])))
+        # assign attributes for the candidate graph
         attrs = {
             "t": frame,
             "x": centroid[1],
@@ -78,26 +86,12 @@ for frame in range(0, dilated.shape[0]):
             "flow": flow,
         }
 
+        # update node id value
         node_id += int(last_node_id)
-        print(node_id)
+        # add nodes to candidate graph
         cand_graph.add_node(node_id, **attrs)
 print(cand_graph)
 
-
-quit()
-
-for idx, row in tqdm(blobs_df.iterrows(), total=len(blobs_df), desc="Building candidate graph"):
-    flow = calculate_flow_offset_pseudomask(row, flow_raw, 5)
-    # take flow zarr and slice for each time point (frame) basically just bring in the whole row to the function
-    # flow = # function goes here
-    attrs = {
-        "t": int(row["frame"]),
-        "x": row["x"],
-        "y": row["y"],
-        "flow": flow,
-    }
-    cand_graph.add_node(idx, **attrs)
-print(cand_graph)
 # nx.write_graphml(cand_graph, 'cand_graph.graphml') # doesn't like the flow tuple...
 # jen says we can write this to geff
 write(
@@ -111,12 +105,12 @@ points_array = np.array([[data["t"], data["y"], data["x"]] for node, data in can
 cand_points_layer = napari.layers.Points(data=points_array, name="cand_points")
 
 # check everything in napari - candidate nodes should be in the center of the detected blobs (red circles)
-viewer = napari.Viewer()
-viewer.add_image(np_arr[:,0], name = "Raw image")
-viewer.add_points(blobs_df, size = 30, face_color = "transparent", border_color="red", border_width=0.1)
-viewer.add_labels(dilated)
-viewer.add_layer(cand_points_layer)
-napari.run()
+# viewer = napari.Viewer()
+# viewer.add_image(np_arr[:,0], name = "Raw image")
+# viewer.add_points(blobs_df, size = 30, face_color = "transparent", border_color="red", border_width=0.1)
+# viewer.add_labels(dilated)
+# viewer.add_layer(cand_points_layer)
+# napari.run()
 
 # Add edges
 def _compute_node_frame_dict(cand_graph: nx.DiGraph) -> dict[int, list[Any]]:
