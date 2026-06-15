@@ -1,39 +1,65 @@
 import napari
 import zarr
 import scipy
+import skimage
 
-from pathlib import Path
 import numpy as np
 import pandas as pd
 import networkx as nx
 
+from pathlib import Path
 from tqdm.auto import tqdm
 from typing import Iterable, Any
+from skimage.morphology import disk
 
 # Load in detected spots
 # csv -> numpy array
 blobs_fp = "/mnt/efs/dl_jrc/student_data/S-DK/Sphere/220725_i11w-hT-M33-I76_sg1035_d10sphere/sg100_Well5_1018_blobs.csv"
 blobs_df = pd.read_csv(blobs_fp)
+print(type(blobs_df))
 # blobs_np = blobs_df.to_numpy()
 print("Annotated blobs loaded!")
 
 # import flow zarr
+flow_path = Path("/home/S-DK/TrainTracks/flow.zarr")
+flow_root = zarr.open_group(flow_path, mode='r')
+flow_raw = flow_root['flow_raw'] 
 
+# define a region around the ROIs
+def calculate_flow_offset_pseudomask(
+        blob: pd.DataFrame, 
+        # zarr
+        radius: 5,
 
-def calculate_flow_offset():
+):
+    # input is row (that has frame, x, and y) as well as the flow zarr, and a radius
+
+    # Goal: 
+    # take blob coord and frame info from the row 
+        # draw a circurlar roi around the coords 
     # take flow zarr info
+        # calculate the average flow in the roi
+    
+    roi = skimage.morphology.disk()
+
     # pull flows in a region (i.e. a small circle around our detected blob) and average them
+
+    # use skimage.morphology.disk to make a roi around the centroid and then calcuate the average flow in that space
     pass
 
+# Generate cand_graph 
+# Generate it with flow attached
 cand_graph = nx.DiGraph()
 for idx, row in blobs_df.iterrows():
+    # take flow zarr and slice for each time point (frame) basically just bring in the whole row to the function
+    # flow = # function goes here
     attrs = {
         "t": int(row["frame"]),
         "x": row["x"],
         "y": row["y"],
+        # "flow": flow,
     }
     cand_graph.add_node(idx, **attrs)
-
 print(cand_graph)
 
 # Check to see if nodes and blobs align
