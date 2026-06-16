@@ -1,19 +1,21 @@
+# standard libaraires
+# enviornment loaded libraries
+# project specific libraries
+
+from typing import Iterable, Any
+from pathlib import Path
+
 import napari
 import zarr
 import scipy
 import skimage
 import motile
 import geff
-
 import numpy as np
 import pandas as pd
 import networkx as nx
-
-from pathlib import Path
 from tqdm.auto import tqdm
-from typing import Iterable, Any
 from skimage.morphology import disk, binary_dilation
-
 
 # Load in detected spots
 # csv -> numpy array
@@ -104,8 +106,8 @@ for frame in range(0, dilated.shape[0]):
 # )
 
 # set up cand_graph to be viewed in napari - remember my images are TYX 
-points_array = np.array([[data["t"], data["y"], data["x"]] for node, data in cand_graph.nodes(data=True)])
-cand_points_layer = napari.layers.Points(data=points_array, name="cand_points")
+# points_array = np.array([[data["t"], data["y"], data["x"]] for node, data in cand_graph.nodes(data=True)])
+# cand_points_layer = napari.layers.Points(data=points_array, name="cand_points")
 
 # check everything in napari - candidate nodes should be in the center of the detected blobs (red circles)
 # viewer = napari.Viewer()
@@ -201,7 +203,6 @@ cand_trackgraph = motile.TrackGraph(cand_graph, frame_attribute="t")
 
 print("Calculating drift distances using optical flow...")
 add_flow_dist_attr(cand_trackgraph)
-print(cand_trackgraph.edges)
 
 solver = motile.Solver(cand_trackgraph)
 solver.add_cost(
@@ -221,13 +222,14 @@ solver.add_constraint(motile.constraints.MaxChildren(1))
 
 solver.solve()
 solution_graph = solver.get_selected_subgraph()
+solution_graph_nx = solution_graph.to_nx_graph()
 
 def print_graph_stats(graph, name):
     print(f"{name}\t\t{graph.number_of_nodes()} nodes\t{graph.number_of_edges()} edges\t{len(list(nx.weakly_connected_components(graph)))} tracks")
-print_graph_stats(solution_graph, "test_run")
+print_graph_stats(solution_graph_nx, "test_run")
 
 geff.write(
-    solution_graph,
+    solution_graph_nx,
     "solution_graph.geff",
     zarr_format=3
 )
