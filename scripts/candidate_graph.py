@@ -16,6 +16,9 @@ import pandas as pd
 import networkx as nx
 from tqdm.auto import tqdm
 from skimage.morphology import disk, binary_dilation
+from motile_tracker.motile.backend import MotileRun
+from motile_tracker.data_views.views.tree_view.tree_widget import TreeWidget
+from motile_tracker.data_views.views_coordinator.tracks_viewer import TracksViewer
 
 # Load in detected spots
 # csv -> numpy array
@@ -228,8 +231,28 @@ def print_graph_stats(graph, name):
     print(f"{name}\t\t{graph.number_of_nodes()} nodes\t{graph.number_of_edges()} edges\t{len(list(nx.weakly_connected_components(graph)))} tracks")
 print_graph_stats(solution_graph_nx, "test_run")
 
-geff.write(
-    solution_graph_nx,
-    "solution_graph.geff",
-    zarr_format=3
+# geff.write(
+#     solution_graph_nx,
+#     "solution_graph.geff",
+#     zarr_format=3
+# )
+
+test_run_1 = MotileRun(
+    graph=solution_graph,
+    input_segmentation=None,
+    run_name="Test run 1",
+    time_attr="t",
+    pos_attr=("x", "y"),
 )
+
+viewer = napari.Viewer()
+
+widget = TreeWidget(viewer)
+viewer.window.add_dock_widget(widget, name="Lineage View", area="right")
+tracks_viewer = TracksViewer.get_instance(viewer)
+
+viewer.add_image(np_arr[:,0], name = "Raw image")
+viewer.add_points(blobs_df, size = 30, face_color = "transparent", border_color="red", border_width=0.1)
+viewer.add_labels(dilated)
+tracks_viewer.update_tracks(test_run_1, "Test run 1")
+napari.run()
