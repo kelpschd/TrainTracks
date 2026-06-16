@@ -2,6 +2,8 @@ import napari
 import zarr
 import scipy
 import skimage
+import motile
+import geff
 
 import numpy as np
 import pandas as pd
@@ -11,7 +13,7 @@ from pathlib import Path
 from tqdm.auto import tqdm
 from typing import Iterable, Any
 from skimage.morphology import disk, binary_dilation
-from geff import write
+
 
 # Load in detected spots
 # csv -> numpy array
@@ -71,13 +73,14 @@ for frame in range(0, dilated.shape[0]):
     for regionprop in props:
         # get the node ids
         node_id = int(regionprop.label)
-        region = segmentation[frame] == node_id 
+        region = segmentation == node_id 
         # pull centroids
         centroid = (float(regionprop.centroid[0]),
                     float(regionprop.centroid[1]))
         # calc flows
-        flow = (float(np.mean(flow_frame[region][:1])),
-                float(np.mean(flow_frame[region][:0])))
+        flow = (float(np.mean(flow_frame[region][..., 1])),
+                float(np.mean(flow_frame[region][..., 0])))
+
         # assign attributes for the candidate graph
         attrs = {
             "t": frame,
@@ -90,15 +93,15 @@ for frame in range(0, dilated.shape[0]):
         node_id += int(last_node_id)
         # add nodes to candidate graph
         cand_graph.add_node(node_id, **attrs)
-print(cand_graph)
+#print(cand_graph.nodes(data = True))
 
 # nx.write_graphml(cand_graph, 'cand_graph.graphml') # doesn't like the flow tuple...
 # jen says we can write this to geff
-write(
-    cand_graph,
-    "cand_graph.geff",
-    zarr_format=2  # 2 or 3
-)
+# geff.write(
+#     cand_graph,
+#     "cand_graph.geff",
+#     zarr_format=3
+# )
 
 # set up cand_graph to be viewed in napari - remember my images are TYX 
 points_array = np.array([[data["t"], data["y"], data["x"]] for node, data in cand_graph.nodes(data=True)])
@@ -180,3 +183,51 @@ print(f"Our candidate graph has {cand_graph.number_of_nodes()} nodes and {cand_g
 # related to how much flashing I see in blob detection, we may try
 # to add skip connections - will have to see if there is code avaialbe
 # for that already
+
+def add_flow_dist_attr(cand_graph: motile.TrackGraph):
+    for edge in cand_graph.edges:
+        u, v = edge
+        node_u = cand_graph.nodes[u]
+        node_v = cand_graph.nodes[v]
+        flow_u = node_u["flow"]
+        pos_u = np.array([node_u["y"], node_u["x"]])
+        pos_v = np.array([node_v["y"], node_v["x"]])
+
+        predicted = pos_u + np.array(flow_u)
+        flow_dist = np.linalg.norm(predicted - pos_v)
+        cand_graph.edges[edge]["flow_offset"] = flow_dist
+
+cand_trackgraph = motile.TrackGraph(cand_graph, frame_attribute="t")
+
+print("Calculating drift distances using optical flow...")
+add_flow_dist_attr(cand_trackgraph)
+print(cand_trackgraph.edges)
+
+solver = motile.Solver(cand_trackgraph)
+solver.add_cost(
+        motile.costs.NodeSelection(weight=1.0)
+    )
+solver.add_cost(
+        motile.costs.EdgeSelection(weight=-1.0, attribute = "flow_offset", constant=-1.0)
+    )
+solver.add_cost(motile.costs.Appear(constant=2.0))
+
+# should we add a merge cost? might add as a constraint later
+
+# what about disappear?
+# solver.add_cost(motile.costs.Appear(constant=2.0))
+solver.add_constraint(motile.constraints.MaxParents(1))
+solver.add_constraint(motile.constraints.MaxChildren(1))
+
+solver.solve()
+solution_graph = solver.get_selected_subgraph()
+
+def print_graph_stats(graph, name):
+    print(f"{name}\t\t{graph.number_of_nodes()} nodes\t{graph.number_of_edges()} edges\t{len(list(nx.weakly_connected_components(graph)))} tracks")
+print_graph_stats(solution_graph, "test_run")
+
+geff.write(
+    solution_graph,
+    "solution_graph.geff",
+    zarr_format=3
+)
