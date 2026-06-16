@@ -3,7 +3,7 @@ build-backend = "setuptools.build_meta"
 requires = ["setuptools", "wheel"]
 
 [project]
-name = "TrainTracks2"
+name = "TrainTracks3"
 description = "Tracking particle"
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
@@ -20,8 +20,8 @@ dependencies = [
     "opencv-python",
     "zarr",
     "nd2",
+    "napari[all]",
     "motile",
-    "motile-plugin",
     "motile-tracker",
     "traccuracy",
     "pathlib",
