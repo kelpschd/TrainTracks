@@ -22,6 +22,7 @@ dependencies = [
     "nd2",
     "motile",
     "motile-plugin",
+    "motile-tracker",
     "traccuracy",
     "pathlib",
     "ome-zarr"
