@@ -3,6 +3,9 @@
 *.tiff
 *.tif
 *.geff
+*.png
+*.gif
+*.webp
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
