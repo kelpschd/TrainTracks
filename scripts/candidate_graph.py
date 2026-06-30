@@ -22,7 +22,7 @@ from motile_tracker.data_views.views_coordinator.tracks_viewer import TracksView
 
 # Load in detected spots
 # csv -> numpy array
-blobs_fp = "/mnt/efs/dl_jrc/student_data/S-DK/Sphere/220725_i11w-hT-M33-I76_sg1035_d10sphere/sg100_Well5_1018_blobs.csv"
+blobs_fp = "/Users/dankelpsch/Datatecnica/TTU/Data/Sphere/220725_i11w-hT-M33-I76_sg1035_d10sphere/sg100_Well5_1018_blobs.csv"
 blobs_df = pd.read_csv(blobs_fp)
 print(blobs_df)
 blobs_np = blobs_df.to_numpy().astype(np.uint16)
@@ -30,7 +30,7 @@ print(blobs_np)
 print("Annotated blobs loaded!")
 
 # import flow zarr
-flow_path = Path("/home/S-DK/TrainTracks/flow.zarr")
+flow_path = Path("/Users/dankelpsch/Datatecnica/TrainTracks/flow.zarr")
 flow_root = zarr.open_group(flow_path, mode='r')
 flow_raw = flow_root['flow_raw'] 
 flow_arr = np.array(flow_raw)
@@ -48,7 +48,7 @@ for frame in range(0, mask.shape[0]):
 
 # Check to see if nodes and blobs align
 # import raw img for reference
-images_dir = Path("/mnt/efs/dl_jrc/student_data/S-DK/Sphere/220725_i11w-hT-M33-I76_sg1035_d10sphere")
+images_dir = Path("/Users/dankelpsch/Datatecnica/TTU/Data/Sphere/220725_i11w-hT-M33-I76_sg1035_d10sphere")
 images = list(sorted(images_dir.glob('*.zarr')))
 img_num = 9
 zarr_root = zarr.open(images[img_num], mode = 'r')
@@ -107,6 +107,10 @@ for frame in range(0, dilated.shape[0]):
 #     "cand_graph.geff",
 #     zarr_format=3
 # )
+
+######
+# Good place to break into two scripts
+######
 
 # set up cand_graph to be viewed in napari - remember my images are TYX 
 # points_array = np.array([[data["t"], data["y"], data["x"]] for node, data in cand_graph.nodes(data=True)])
@@ -212,7 +216,7 @@ solver.add_cost(
         motile.costs.NodeSelection(weight=1.0)
     )
 solver.add_cost(
-        motile.costs.EdgeSelection(weight=-1.0, attribute = "flow_offset", constant=-1.0)
+        motile.costs.EdgeSelection(weight=3.0, attribute = "flow_offset", constant=-36.0)
     )
 solver.add_cost(motile.costs.Appear(constant=2.0))
 
@@ -231,28 +235,28 @@ def print_graph_stats(graph, name):
     print(f"{name}\t\t{graph.number_of_nodes()} nodes\t{graph.number_of_edges()} edges\t{len(list(nx.weakly_connected_components(graph)))} tracks")
 print_graph_stats(solution_graph_nx, "test_run")
 
-# geff.write(
-#     solution_graph_nx,
-#     "solution_graph.geff",
-#     zarr_format=3
-# )
-
-test_run_1 = MotileRun(
-    graph=solution_graph,
-    input_segmentation=None,
-    run_name="Test run 1",
-    time_attr="t",
-    pos_attr=("x", "y"),
+geff.write(
+    solution_graph_nx,
+    "test_run_7.geff",
+    zarr_format=3
 )
 
-viewer = napari.Viewer()
+# test_run_1 = MotileRun(
+#     graph=solution_graph,
+#     input_segmentation=None,
+#     run_name="Test run 2",
+#     time_attr="t",
+#     pos_attr=("x", "y"),
+# )
 
-widget = TreeWidget(viewer)
-viewer.window.add_dock_widget(widget, name="Lineage View", area="right")
-tracks_viewer = TracksViewer.get_instance(viewer)
+# viewer = napari.Viewer()
 
-viewer.add_image(np_arr[:,0], name = "Raw image")
-viewer.add_points(blobs_df, size = 30, face_color = "transparent", border_color="red", border_width=0.1)
-viewer.add_labels(dilated)
-tracks_viewer.update_tracks(test_run_1, "Test run 1")
-napari.run()
+# widget = TreeWidget(viewer)
+# viewer.window.add_dock_widget(widget, name="Lineage View", area="right")
+# tracks_viewer = TracksViewer.get_instance(viewer)
+
+# viewer.add_image(np_arr[:,0], name = "Raw image")
+# viewer.add_points(blobs_df, size = 30, face_color = "transparent", border_color="red", border_width=0.1)
+# viewer.add_labels(dilated)
+# tracks_viewer.update_tracks(test_run_1, "Test run 1")
+# napari.run()
