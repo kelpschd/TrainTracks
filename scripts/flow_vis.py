@@ -122,7 +122,7 @@ def generate_flow_frames(flow_zarr, scale_factor=0.1, color_wheel=False):
     flow_zarr['flow_frames_XY'][:] = flow_frames
 
 # load in flow.zarr
-flow_path = Path("/home/S-DK/TrainTracks/flow.zarr")
+flow_path = Path("/Users/kelpschdj/Documents/DataTecnica/TTU/TrainTracks/flow.zarr")
 flow_root = zarr.open_group(flow_path, mode='a')
 flow_raw = flow_root['flow_raw'] 
 np_flow = np.array(flow_raw)
@@ -135,7 +135,7 @@ flow_frames_test = flow_root['flow_frames_XY']
 print(f"flow frames XY is shape: {np.array(flow_frames_test).shape}")
 
 # import raw img for reference
-images_dir = Path("/mnt/efs/dl_jrc/student_data/S-DK/Sphere/220725_i11w-hT-M33-I76_sg1035_d10sphere")
+images_dir = Path("/Users/kelpschdj/Documents/DataTecnica/TTU/Data/Sphere/220725_i11w-hT-M33-I76_sg1035_d10sphere/raw_data/")
 images = list(sorted(images_dir.glob('*.zarr')))
 print(f"Found {len(images)} zarr files")
 
