@@ -13,7 +13,7 @@ from tqdm import tqdm
 from pathlib import Path
 from skimage.exposure import equalize_adapthist
 
-images_dir = Path("/mnt/efs/dl_jrc/student_data/S-DK/Sphere/220725_i11w-hT-M33-I76_sg1035_d10sphere")
+images_dir = Path("/Users/kelpschdj/Documents/DataTecnica/TTU/Data/Sphere/220725_i11w-hT-M33-I76_sg1035_d10sphere/raw_data/")
 images = list(sorted(images_dir.glob('*.zarr')))
 print(f"Found {len(images)} zarr files")
 
