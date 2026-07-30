@@ -128,8 +128,11 @@ flow_raw = flow_root['flow_raw']
 np_flow = np.array(flow_raw)
 print(np_flow.shape)
 
-# set up if statement to see if flow_frames_XY is there
-generate_flow_frames(flow_root, scale_factor=0.1, color_wheel=True)
+# generate flow frames
+if 'flow_frames_XY' not in flow_root:
+    generate_flow_frames(flow_root, scale_factor=0.1, color_wheel=True)
+else:
+    print("flow_frames_XY exists, skipping flow frame generation")
 
 flow_frames_test = flow_root['flow_frames_XY']
 print(f"flow frames XY is shape: {np.array(flow_frames_test).shape}")
