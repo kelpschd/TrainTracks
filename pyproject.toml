@@ -3,7 +3,7 @@ build-backend = "setuptools.build_meta"
 requires = ["setuptools", "wheel"]
 
 [project]
-name = "TrainTracks4"
+name = "TrainTracks"
 description = "Tracking particle"
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
@@ -13,17 +13,25 @@ classifiers = [
 keywords = []
 license = { text = "BSD 3-Clause License" }
 authors = [
-    { email = "kelpschd@gmail.com ", name = "Dan Kelpsch " },
+    { email = "kelpschd@gmail.com", name = "Dan Kelpsch" },
 ]
 dynamic = ["version"]
 dependencies = [
+    "numpy",
     "opencv-python",
-    "zarr",
+    "zarr>=3,<4",
     "nd2",
-    "napari[all]", 
+    "napari[all]",
     "motile",
     "motile-tracker",
-    "traccuracy",
-    "pathlib",
-    "ome-zarr"
+    "geff",
+    "funtracks==2.0.2",
+    "scikit-image",
+    "scipy",
+    "pandas",
+    "networkx",
+    "tqdm",
+    "imageio",
+    "Pillow",
+    "ome-zarr",
 ]
