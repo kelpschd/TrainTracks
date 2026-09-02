@@ -33,7 +33,7 @@ if __name__ == "__main__":
     np_arr = np.array(arr)
     print("Raw image loaded!")
 
-    blobs_fp = "/Users/kelpschdj/Documents/DataTecnica/TTU/Data/Sphere/220725_i11w-hT-M33-I76_sg1035_d10sphere/sg100_Well5_1018_blobs.csv"
+    blobs_fp = "/Users/kelpschdj/Documents/DataTecnica/TTU/TrainTracks/blobs/blobs_0_00015.csv"
     blobs_df = pd.read_csv(blobs_fp)
     print(blobs_df)
     blobs_np = blobs_df.to_numpy().astype(np.uint16)
@@ -47,7 +47,7 @@ if __name__ == "__main__":
 
     # load in tracks.geff
     solution_graph = import_from_geff(
-        directory="/Users/kelpschdj/Documents/DataTecnica/TTU/TrainTracks/test_run_7.geff",
+        directory="/Users/kelpschdj/Documents/DataTecnica/TTU/TrainTracks/tracking_runs/blobs_0_00015.geff",
         node_name_map={"time": "t", "pos": ["y", "x"]})
     
     solution_graph_nx = solution_graph.graph
