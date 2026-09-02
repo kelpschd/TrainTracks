@@ -33,6 +33,8 @@ from tqdm.auto import tqdm
 
 import zarr
 import motile
+import motile.costs
+import motile.constraints
 import geff
 
 
@@ -303,7 +305,9 @@ def run(blobs_csv: Path, note: str = "") -> dict:
     # --- Write GEFF named after the input CSV (no overwrite across thresholds) ---
     output_geff = OUTPUT_DIR / f"{blobs_csv.stem}.geff"
     if solution_nx.number_of_nodes() > 0:
-        geff.write(solution_nx, str(output_geff), zarr_format=3)
+        # overwrite=True so re-running the same CSV replaces its own GEFF rather
+        # than erroring on the existing store.
+        geff.write(solution_nx, str(output_geff), zarr_format=3, overwrite=True)
         print(f"Wrote GEFF: {output_geff}")
     else:
         print("Empty solution graph -- no GEFF written")
@@ -342,4 +346,7 @@ if __name__ == "__main__":
     main()
 
 
-# python /Users/kelpschdj/Documents/DataTecnica/TTU/TrainTracks/scripts/candidate_graph.py /Users/kelpschdj/Documents/DataTecnica/TTU/TrainTracks/blobs/blobs_0_00021.csv -- note "original threshold"
+# python scripts/candidate_graph.py /Users/kelpschdj/Documents/DataTecnica/TTU/TrainTracks/blobs/blobs_0_00021.csv --note "original threshold"
+# python scripts/candidate_graph.py /Users/kelpschdj/Documents/DataTecnica/TTU/TrainTracks/blobs/blobs_0_00019.csv
+# python scripts/candidate_graph.py /Users/kelpschdj/Documents/DataTecnica/TTU/TrainTracks/blobs/blobs_0_00017.csv
+# python scripts/candidate_graph.py /Users/kelpschdj/Documents/DataTecnica/TTU/TrainTracks/blobs/blobs_0_00015.csv
