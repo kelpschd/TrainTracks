@@ -56,7 +56,7 @@ MIN_OBJECT_SIZE = 400          # mask param (unused when APPLY_MASK=False)
 MASK_DILATION_RADIUS = 5       # mask param (unused when APPLY_MASK=False)
 
 # --- Detection (blob_log) -----------------------------------------------------
-THRESHOLD = 0.00015            # your working value - this was orginally 0.00021
+THRESHOLD = 0.00021            # your working value - this was orginally 0.00021
 MIN_SIGMA = 1
 MAX_SIGMA = 3
 GAUSSIAN_SIGMA = 1             # pre-blur sigma; only used if USE_GAUSSIAN_BLUR
