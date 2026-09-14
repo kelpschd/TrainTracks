@@ -62,6 +62,39 @@ def graph_to_tracks_array(solution_graph):
     return df[["particle", "frame", "y", "x"]].to_numpy()
 
 
+def track_df_to_nx(df):
+    """
+    Build a networkx DiGraph from a track_df (columns: particle, frame, y, x).
+
+    Nodes carry t/y/x attributes; edges connect each particle's detections in
+    consecutive-by-frame order (within a particle). This is the structure
+    traccuracy's TrackingGraph expects. Works for both the validated GT CSV and
+    the solution graphs (via geff_tracks_to_track_df).
+    """
+    import networkx as nx
+
+    g = nx.DiGraph()
+    df = df.sort_values(["particle", "frame"]).reset_index(drop=True)
+
+    for pid, group in df.groupby("particle"):
+        group = group.sort_values("frame")
+        prev_node = None
+        for _, row in group.iterrows():
+            # unique node id per (particle, frame)
+            node_id = f"{int(pid)}_{int(row['frame'])}"
+            g.add_node(
+                node_id,
+                t=int(row["frame"]),
+                y=float(row["y"]),
+                x=float(row["x"]),
+            )
+            if prev_node is not None:
+                g.add_edge(prev_node, node_id)
+            prev_node = node_id
+
+    return g
+
+
 # ---------------------------
 # Paths / config
 # ---------------------------
@@ -72,6 +105,9 @@ IMAGES_DIR = Path(
     "220725_i11w-hT-M33-I76_sg1035_d10sphere/raw_data"
 )
 IMG_NUM = 9
+
+# manually validated ground-truth tracks (columns: frame, x, y, particle)
+GT_CSV = '/Users/kelpschdj/Documents/DataTecnica/TTU/TrainTracks/sg100_Well5_1018_valid_tracks.csv'
 
 # blob detection thresholds to compare, keyed by their filename suffix
 THRESHOLDS = ["0_00015", "0_00017", "0_00019", "0_00021"]
@@ -110,6 +146,9 @@ if __name__ == "__main__":
         print(f"blobs_{thr}: {len(sg.nodes())} nodes")
 
     # TODO: load in the validated (ground truth) tracks here
+    gt_df = pd.read_csv(GT_CSV)
+    print(f"Validated tracks loaded! {gt_df['particle'].nunique()} tracks, "
+          f"{len(gt_df)} detections")
 
     # ---------------------------
     # napari
@@ -130,5 +169,11 @@ if __name__ == "__main__":
         viewer.add_tracks(
             graph_to_tracks_array(solution_graphs[thr]), name=f"tracks_{thr}"
         )
+
+    # validated tracks -- already in track_df shape, just reorder for napari
+    viewer.add_tracks(
+        gt_df[["particle", "frame", "y", "x"]].to_numpy(),
+        name="manually_validated_tracks",
+    )
 
     napari.run()
