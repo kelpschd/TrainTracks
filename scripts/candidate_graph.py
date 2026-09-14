@@ -1,23 +1,23 @@
 # candidate_graph.py
 #
 # Input : ONE blob CSV (t, y, x), passed by the user.
-# Output: - a solved track GEFF, named after the input CSV
-#         - one appended row in a shared CSV log capturing the experimental
-#           setup (input, params) and resulting track-continuity metrics.
+# Output: - a unique run directory under tracking_runs/runs/<run_id>/ holding
+#           the solved track GEFF and a metadata.json (all params + results)
+#         - one appended row in a shared CSV log indexing every run
 #
 # Detection is NOT part of this script -- blobs come from a separate detection
-# script. Run this once per blob CSV; the log accumulates one row per run so you
-# can compare tracking across detection thresholds.
+# script. Run this once per blob CSV. Each run is fully isolated (its own
+# directory + run_id), so sweeping gap params never overwrites a prior run.
 #
 # Usage:
 #   python candidate_graph.py /path/to/blobs_0_00021.csv
-#   python candidate_graph.py /path/to/blobs_0_00021.csv --note "baseline"
+#   python candidate_graph.py /path/to/blobs_0_00021.csv --note "maxgap2 pen20"
 
 from __future__ import annotations
 
-import re
 import csv
 import json
+import uuid
 import argparse
 from typing import Iterable, Any
 from pathlib import Path
@@ -40,7 +40,8 @@ import geff
 
 # ============================================================================
 # CONFIG -- fixed inputs and tracking params (held constant across runs so the
-# only thing that varies between logged rows is the input blob CSV / threshold)
+# only thing that varies between logged rows is the input blob CSV and whatever
+# gap params you deliberately change here)
 # ============================================================================
 
 # Flow (precomputed by optical_flow.py): (T, Y, X, 2)
@@ -48,17 +49,26 @@ FLOW_PATH = Path(
     "/Users/kelpschdj/Documents/DataTecnica/TTU/TrainTracks/flow.zarr"
 )
 
-# Where GEFF outputs and the log CSV go
+# Root for all tracking outputs. Each run gets its own subdir under runs/,
+# and a shared CSV indexes every run for cross-run comparison.
 OUTPUT_DIR = Path(
     "/Users/kelpschdj/Documents/DataTecnica/TTU/TrainTracks/tracking_runs"
 )
-LOG_CSV = OUTPUT_DIR / "tracking_log.csv"
+RUNS_DIR = OUTPUT_DIR / "runs"        # per-run subdirectories live here
+LOG_CSV = OUTPUT_DIR / "tracking_log.csv"  # one row per run (queryable index)
 
-# Fixed tracking params -- change only if you deliberately want to; every value
-# is recorded in the log so any row is fully reproducible.
+# Tracking params. Every value is recorded in the log so any row is fully
+# reproducible. Edit + rerun to sweep; the gap params are the ones you'll tune.
 FIXED_PARAMS = dict(
     dilation_radius=5,          # disk radius for per-region flow averaging
     max_edge_distance=30.0,     # KDTree edge cutoff between adjacent frames
+    # --- gap-closing (skip edges) ---
+    max_gap=2,                  # 1 = adjacent frames only (original behavior);
+                                # 2 or 3 = allow skipping missing frames.
+    gap_penalty=20.0,           # added to flow_offset per skipped frame, so a
+                                # direct edge wins when one exists. 0 = skips
+                                # free (over-merges); high = skips never chosen.
+    # --- motile costs / constraints ---
     node_selected_weight=1.0,   # motile NodeSelectedCost
     edge_selected_weight=3.0,   # motile EdgeSelectedCost
     edge_flow_attribute="flow_offset",
@@ -73,7 +83,7 @@ LONG_TRACK_MIN_FRAMES = 10
 
 
 # ============================================================================
-# Candidate graph  (logic unchanged from your original candidate_graph.py)
+# Candidate graph
 # ============================================================================
 
 def build_candidate_graph(
@@ -125,39 +135,63 @@ def _create_kdtree(cand_graph: nx.DiGraph, node_ids: Iterable[Any]) -> scipy.spa
     return scipy.spatial.KDTree(positions)
 
 
-def add_cand_edges(cand_graph: nx.DiGraph, max_edge_distance: float) -> None:
-    """Connect nodes within max_edge_distance in adjacent frames (in place)."""
-    print("Extracting candidate edges")
+def add_cand_edges(
+    cand_graph: nx.DiGraph,
+    max_edge_distance: float,
+    max_gap: int = 1,
+) -> None:
+    """Connect nodes across frames within distance, in place.
+
+    For each source frame f, connect to frames f+1 ... f+max_gap. The search
+    radius scales with the gap (max_edge_distance * gap) because a cell unseen
+    for `gap` frames can have travelled proportionally farther. Each edge stores
+    its `gap` (1 = adjacent) so the cost can penalize skips.
+
+    max_gap=1 reproduces the original adjacent-frame-only behavior exactly.
+    """
+    print(f"Extracting candidate edges (max_gap={max_gap})")
     node_frame_dict = _compute_node_frame_dict(cand_graph)
     frames = sorted(node_frame_dict.keys())
     if not frames:
         return
-    prev_node_ids = node_frame_dict[frames[0]]
-    prev_kdtree = _create_kdtree(cand_graph, prev_node_ids)
+
+    # Cache one KDTree per frame (each frame is now a target for several
+    # source frames, so building trees once avoids redundant work).
+    kdtrees = {f: _create_kdtree(cand_graph, node_frame_dict[f]) for f in frames}
 
     for frame in tqdm(frames):
-        if frame + 1 not in node_frame_dict:
-            continue
-        next_node_ids = node_frame_dict[frame + 1]
-        next_kdtree = _create_kdtree(cand_graph, next_node_ids)
-        matched = prev_kdtree.query_ball_tree(next_kdtree, max_edge_distance)
-        for prev_id, next_idxs in zip(prev_node_ids, matched):
-            for j in next_idxs:
-                cand_graph.add_edge(prev_id, next_node_ids[j])
-        prev_node_ids = next_node_ids
-        prev_kdtree = next_kdtree
+        src_ids = node_frame_dict[frame]
+        src_tree = kdtrees[frame]
+        for gap in range(1, max_gap + 1):
+            target = frame + gap
+            if target not in node_frame_dict:
+                continue
+            tgt_ids = node_frame_dict[target]
+            tgt_tree = kdtrees[target]
+            matched = src_tree.query_ball_tree(tgt_tree, max_edge_distance * gap)
+            for src_id, tgt_idxs in zip(src_ids, matched):
+                for j in tgt_idxs:
+                    cand_graph.add_edge(src_id, tgt_ids[j], gap=gap)
 
 
-def add_flow_dist_attr(cand_graph: motile.TrackGraph) -> None:
-    """Attach flow_offset to each edge: |(pos_u + flow_u) - pos_v|."""
+def add_flow_dist_attr(cand_graph: motile.TrackGraph, gap_penalty: float) -> None:
+    """Attach flow_offset to each edge.
+
+    Base offset is |(pos_u + flow_u * gap) - pos_v|: the per-frame flow is
+    extrapolated across the gap (constant-velocity assumption, fine for small
+    gaps). A penalty of gap_penalty * (gap - 1) is added so a direct edge (gap
+    1, no penalty) is preferred whenever it competes with a skip edge.
+    """
     for edge in cand_graph.edges:
         u, v = edge
         node_u = cand_graph.nodes[u]
         node_v = cand_graph.nodes[v]
+        gap = cand_graph.edges[edge].get("gap", 1)
         pos_u = np.array([node_u["y"], node_u["x"]])
         pos_v = np.array([node_v["y"], node_v["x"]])
-        predicted = pos_u + np.array(node_u["flow"])
-        cand_graph.edges[edge]["flow_offset"] = float(np.linalg.norm(predicted - pos_v))
+        predicted = pos_u + np.array(node_u["flow"]) * gap
+        base = float(np.linalg.norm(predicted - pos_v))
+        cand_graph.edges[edge]["flow_offset"] = base + gap_penalty * (gap - 1)
 
 
 def solve_tracks(cand_graph: nx.DiGraph, params: dict) -> nx.DiGraph:
@@ -167,7 +201,7 @@ def solve_tracks(cand_graph: nx.DiGraph, params: dict) -> nx.DiGraph:
 
     cand_trackgraph = motile.TrackGraph(cand_graph, frame_attribute="t")
     print("Calculating drift distances using optical flow...")
-    add_flow_dist_attr(cand_trackgraph)
+    add_flow_dist_attr(cand_trackgraph, params["gap_penalty"])
 
     solver = motile.Solver(cand_trackgraph)
     solver.add_cost(motile.costs.NodeSelectedCost(weight=params["node_selected_weight"]))
@@ -205,6 +239,7 @@ def track_metrics(solution_nx: nx.DiGraph, long_min_frames: int) -> dict:
             n_detections_tracked=0, n_edges=0, n_tracks=0,
             mean_track_len=0.0, median_track_len=0.0, max_track_len=0,
             n_long_tracks=0, frac_nodes_in_long=0.0, tracks_per_detection=0.0,
+            n_skip_edges=0, frac_skip_edges=0.0,
         )
 
     lengths = []
@@ -217,6 +252,15 @@ def track_metrics(solution_nx: nx.DiGraph, long_min_frames: int) -> dict:
             nodes_in_long += len(comp)
     lengths = np.array(lengths)
 
+    # How many selected edges span a gap (frame difference > 1). Requires the
+    # 't' attribute on both endpoints, which the solution graph carries.
+    n_skip = 0
+    for u, v in solution_nx.edges:
+        du = solution_nx.nodes[u]["t"]
+        dv = solution_nx.nodes[v]["t"]
+        if abs(dv - du) > 1:
+            n_skip += 1
+
     return dict(
         n_detections_tracked=int(n_nodes),
         n_edges=int(n_edges),
@@ -227,38 +271,51 @@ def track_metrics(solution_nx: nx.DiGraph, long_min_frames: int) -> dict:
         n_long_tracks=int(np.sum(lengths >= long_min_frames)),
         frac_nodes_in_long=float(nodes_in_long / n_nodes),
         # Fragmentation proxy: fewer tracks per detection = longer, less-broken
-        # tracks. If a lower detection threshold stitches tracklets, this should
-        # drop/hold as detections rise; if it only adds noise, it rises.
+        # tracks. Should drop as gap-closing stitches tracklets together.
         tracks_per_detection=float(n_tracks / n_nodes),
+        # How much the solver actually used the skip edges you offered.
+        n_skip_edges=int(n_skip),
+        frac_skip_edges=float(n_skip / n_edges) if n_edges else 0.0,
     )
 
 
-def parse_threshold_from_name(csv_path: Path):
-    """Pull the threshold out of names like blobs_0_00021.csv -> 0.00021.
+def make_run_id() -> str:
+    """Timestamp + short random suffix, e.g. 20260914_142530_a3f1.
 
-    Returns float or None if it can't be parsed (logged as null, not an error).
+    Timestamp sorts chronologically and is readable at a glance; the 4-char
+    suffix avoids collisions when two runs start in the same second.
     """
-    m = re.search(r"blobs_([0-9]+(?:_[0-9]+)?)", csv_path.stem)
-    if not m:
-        return None
-    try:
-        return float(m.group(1).replace("_", "."))
-    except ValueError:
-        return None
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    suffix = uuid.uuid4().hex[:4]
+    return f"{ts}_{suffix}"
+
+
+def write_metadata_json(run_dir: Path, meta: dict) -> Path:
+    """Write the authoritative per-run record as metadata.json."""
+    path = run_dir / "metadata.json"
+    with open(path, "w") as f:
+        json.dump(meta, f, indent=2, default=str)
+    return path
 
 
 def append_log_row(row: dict) -> None:
-    """Append one row to LOG_CSV, writing the header once. Stable column order."""
+    """Append one row to LOG_CSV (the cross-run index), header once.
+
+    This is a flat, queryable mirror of each run's metadata.json. The JSON is
+    authoritative; the CSV is for scanning/comparing runs in one table.
+    """
     columns = [
-        "timestamp", "input_csv", "output_geff", "threshold", "note",
+        "run_id", "timestamp", "input_csv", "output_geff", "note",
         "n_blobs_input",
         # metrics
         "n_detections_tracked", "n_edges", "n_tracks",
         "mean_track_len", "median_track_len", "max_track_len",
         "n_long_tracks", "frac_nodes_in_long", "tracks_per_detection",
+        "n_skip_edges", "frac_skip_edges",
         "long_track_min_frames",
-        # fixed params (flattened, so every row is self-describing)
+        # params (flattened, so every row is self-describing)
         "dilation_radius", "max_edge_distance",
+        "max_gap", "gap_penalty",
         "node_selected_weight", "edge_selected_weight",
         "edge_flow_attribute", "edge_selected_constant",
         "node_appear_constant", "max_parents", "max_children",
@@ -276,7 +333,12 @@ def append_log_row(row: dict) -> None:
 # ============================================================================
 
 def run(blobs_csv: Path, note: str = "") -> dict:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    # Create this run's isolated directory up front.
+    run_id = make_run_id()
+    run_dir = RUNS_DIR / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Run ID: {run_id}")
+    print(f"Run dir: {run_dir}")
 
     # --- Load blobs (t, y, x) ---
     print(f"Loading blobs: {blobs_csv}")
@@ -292,7 +354,11 @@ def run(blobs_csv: Path, note: str = "") -> dict:
 
     # --- Candidate graph -> solve ---
     cand = build_candidate_graph(blobs_np, flow_arr, FIXED_PARAMS["dilation_radius"])
-    add_cand_edges(cand, FIXED_PARAMS["max_edge_distance"])
+    add_cand_edges(
+        cand,
+        FIXED_PARAMS["max_edge_distance"],
+        max_gap=FIXED_PARAMS["max_gap"],
+    )
     print(f"Candidate graph: {cand.number_of_nodes()} nodes, {cand.number_of_edges()} edges")
     solution_nx = solve_tracks(cand, FIXED_PARAMS)
 
@@ -300,34 +366,36 @@ def run(blobs_csv: Path, note: str = "") -> dict:
     metrics = track_metrics(solution_nx, LONG_TRACK_MIN_FRAMES)
     print(f"Tracks={metrics['n_tracks']}  long(>={LONG_TRACK_MIN_FRAMES})="
           f"{metrics['n_long_tracks']}  max_len={metrics['max_track_len']}  "
-          f"tracks/det={metrics['tracks_per_detection']:.4f}")
+          f"tracks/det={metrics['tracks_per_detection']:.4f}  "
+          f"skip_edges={metrics['n_skip_edges']} ({metrics['frac_skip_edges']:.1%})")
 
-    # --- Write GEFF named after the input CSV (no overwrite across thresholds) ---
-    output_geff = OUTPUT_DIR / f"{blobs_csv.stem}.geff"
+    # --- Write GEFF into the run directory (fixed name; the run_id disambiguates) ---
+    output_geff = run_dir / "tracks.geff"
     if solution_nx.number_of_nodes() > 0:
-        # overwrite=True so re-running the same CSV replaces its own GEFF rather
-        # than erroring on the existing store.
         geff.write(solution_nx, str(output_geff), zarr_format=3, overwrite=True)
         print(f"Wrote GEFF: {output_geff}")
     else:
         print("Empty solution graph -- no GEFF written")
 
-    # --- Append one log row ---
-    threshold = parse_threshold_from_name(blobs_csv)
-    row = dict(
+    # --- Assemble the run record (authoritative JSON + CSV index row) ---
+    record = dict(
+        run_id=run_id,
         timestamp=datetime.now().isoformat(timespec="seconds"),
         input_csv=str(blobs_csv),
         output_geff=str(output_geff),
-        threshold=threshold,
         note=note,
         n_blobs_input=n_blobs,
         long_track_min_frames=LONG_TRACK_MIN_FRAMES,
         **metrics,
         **FIXED_PARAMS,
     )
-    append_log_row(row)
-    print(f"Logged run -> {LOG_CSV}")
-    return row
+
+    json_path = write_metadata_json(run_dir, record)
+    print(f"Wrote metadata: {json_path}")
+
+    append_log_row(record)
+    print(f"Indexed run -> {LOG_CSV}")
+    return record
 
 
 def main():
@@ -346,7 +414,5 @@ if __name__ == "__main__":
     main()
 
 
-# python scripts/candidate_graph.py /Users/kelpschdj/Documents/DataTecnica/TTU/TrainTracks/blobs/blobs_0_00021.csv --note "original threshold"
+# python scripts/candidate_graph.py /Users/kelpschdj/Documents/DataTecnica/TTU/TrainTracks/blobs/blobs_0_00021.csv --note "maxgap2 pen20"
 # python scripts/candidate_graph.py /Users/kelpschdj/Documents/DataTecnica/TTU/TrainTracks/blobs/blobs_0_00019.csv
-# python scripts/candidate_graph.py /Users/kelpschdj/Documents/DataTecnica/TTU/TrainTracks/blobs/blobs_0_00017.csv
-# python scripts/candidate_graph.py /Users/kelpschdj/Documents/DataTecnica/TTU/TrainTracks/blobs/blobs_0_00015.csv
