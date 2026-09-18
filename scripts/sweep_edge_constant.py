@@ -19,7 +19,7 @@ import candidate_graph as cg
 
 
 # Values to sweep (both directions around the original -36).
-EDGE_CONSTANTS = [-12.0, -24.0, -36.0, -48.0, -60.0]
+EDGE_CONSTANTS = [-72.0, -84.0, -96.0]
 
 
 def run_one(blobs_csv: Path, edge_constant: float) -> dict:
