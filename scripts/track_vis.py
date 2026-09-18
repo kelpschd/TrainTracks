@@ -36,11 +36,7 @@ GT_CSV = BASE / "sg100_Well5_1018_valid_tracks.csv"  # cols: frame, x, y, partic
 
 # Runs to visualize: {label: run_id}. Fill in run_ids from tracking_log.csv.
 RUNS = {
-    "n12": "20260914_171731_4900",
-    "n24": "20260914_172215_e116",
-    "n36": "20260914_172659_2e3a",
-    "n48": "20260914_173145_a485",
-    "n60": "20260914_173629_c280",
+    "pen10": "20260916_105301_9452",
     # "gap2_pen20":   "REPLACE_WITH_RUN_ID",
 }
 
