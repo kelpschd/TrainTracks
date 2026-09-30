@@ -102,23 +102,37 @@ def build_candidate_graph(
 
     cand_graph = nx.DiGraph()
     last_node_id = 0
+
     for frame in range(dilated.shape[0]):
         segmentation = skimage.measure.label(dilated[frame])
         flow_frame = flow_arr[frame]
         props = skimage.measure.regionprops(segmentation)
-        last_node_id += len(props)
 
         for regionprop in props:
-            node_id = int(regionprop.label)
-            region = segmentation == node_id
-            centroid = (float(regionprop.centroid[0]), float(regionprop.centroid[1]))
+            node_id = int(regionprop.label) + last_node_id
+            region = segmentation == regionprop.label
+
+            centroid = (
+                float(regionprop.centroid[0]),
+                float(regionprop.centroid[1]),
+            )
+
             flow = (
                 float(np.mean(flow_frame[region][..., 1])),
                 float(np.mean(flow_frame[region][..., 0])),
             )
-            attrs = {"t": frame, "x": centroid[1], "y": centroid[0], "flow": flow}
-            node_id += int(last_node_id)
+
+            attrs = {
+                "t": frame,
+                "x": centroid[1],
+                "y": centroid[0],
+                "flow": flow,
+            }
+
             cand_graph.add_node(node_id, **attrs)
+
+        # Advance the global offset only after this frame's nodes are created.
+        last_node_id += len(props)
 
     return cand_graph
 
