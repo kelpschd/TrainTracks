@@ -8,6 +8,7 @@
 *.webp
 *.csv
 metadata.json
+TODO.md
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -133,3 +134,6 @@ pyrepo
 
 # OS Files
 .DS_Store
+
+# Claude
+.claude
