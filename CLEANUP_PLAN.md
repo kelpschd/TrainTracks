@@ -49,7 +49,7 @@ TrainTracks/
     exploration_2026-09/ track_vis*, sweep_*, traccuracy_compare, flow_vis, vs_gt_matplotlib ...
     spotiflow_experiment/  (already self-contained; just move)
     legacy_single_movie/ blobs/, test_run_7.geff, root traccuracy CSVs, tracking_runs/
-  (flow.zarr: not archived; moves to the external results root in Phase 3)
+  (flow.zarr: not archived; deleted in Phase 3 after `--gt` calibration is repointed)
   TODO.md                tracked (remove from .gitignore)
 ```
 
@@ -75,8 +75,8 @@ Move the exploration scripts, legacy `blobs/`, `test_run_7.geff`, root
 `traccuracy_*.csv`/`vs_gt_metrics.png` and `tracking_runs/` into `archive/` with a
 one-paragraph README each (what question it answered, date, how to re-run), following
 the style of `spotiflow_experiment/README.md`. Keep the two Spotiflow runs note from
-that README in sync when `tracking_runs/` moves. `flow.zarr` is still needed: leave it
-in place for now and move it to the results root in Phase 3 when paths become config.
+that README in sync when `tracking_runs/` moves. `flow.zarr` is left in place for now
+(`--gt` calibration still reads it) and is deleted in Phase 3 once repointed (see Decision 2).
 
 **Phase 3 - Consolidate shared code into `src/TrainTracks/`.**
 Extract in this order, running the existing batch on one movie after each step and
@@ -96,7 +96,7 @@ hard-coded `/Users/...` paths. Make `metadata.json` store paths relative to
 `DS/raw_data/tracking_batch/...`, which was later renamed). Then, with write access
 or by hand: create `DS/<results folder>/`, move the contents of
 `DS/tracking_batch_TrainTracks/` there (the existing per-movie layout can be kept as is),
-move the repo's `flow.zarr` to it, and move `analysis_20261026.qmd`/`Output_graphs` out
+delete the repo's `flow.zarr` (not move: batch flow already exists per movie), and move `analysis_20261026.qmd`/`Output_graphs` out
 of the batch folder (qmd to `analysis/` in the repo, figures to
 `<results folder>/figures/`). The qmd reads from its own folder with relative paths, so
 it needs a `results_root` parameter at the top. Confirm with a dry run on one movie
@@ -124,9 +124,14 @@ confirm renames only; grep for the old script names and `/Users/dankelpsch/` pat
 1. Batch outputs (`tracking_batch_TrainTracks`) and `analysis_20261026.qmd` live
    outside this repo, next to the raw data. They stay there; the repo gets a config
    entry (`data_root` / `results_root`) instead of hard-coded paths.
-2. `flow.zarr` is still needed. Do not archive or delete it. In Phase 3 the pipeline
-   should write flow (and other large outputs) to the results root, not the repo.
-   Until then it stays in place (it is gitignored).
+2. `flow.zarr` in the repo is not needed long term (batch outputs have their own
+   per-movie flow). Not a byte-identical copy though: it is the legacy (33, Y, X, 2)
+   array with a zero last frame plus `flow_frames_XY` visualisation frames, whereas the
+   batch writes (32, Y, X, 2). Only legacy scripts read it (`track_flow_score.py`
+   including its `--gt` calibration, `candidate_graph.py`, `flow_vis.py`, `track_vis*`).
+   Plan: repoint `--gt` calibration at the results-root flow for sg100_Well5_1018 in
+   Phase 3, then delete the repo copy (regenerable with the optical-flow step).
+   It is gitignored, so there is no git backup.
 3. Cleanup work happens on branch `cleanup/2026-11`; main keeps the pre-cleanup tag.
 4. turn_incoherence and track-ID fixes are done in Phase 3 (see docs/methods_notes.md).
 5. Data layout (decided 2026-11-19). Under the dataset root `DS`
@@ -143,3 +148,14 @@ confirm renames only; grep for the old script names and `/Users/dankelpsch/` pat
    conversion. Claude currently has read-only access to `DS`, so creating the folder
    and moving the existing `tracking_batch_TrainTracks` contents is a step you do (or
    explicitly grant write access for); see Phase 3b.
+6. Ground truth can be expanded now. `DS/tracking_results_old/` has a
+   `<movie>_valid_tracks.csv` for all 32 movies (previous pipeline + manual validation):
+   294 validated tracks, 4040 rows, vs 11 tracks in the repo GT. The repo GT has the same
+   row/track counts as the 1018 file (168 rows, 11 tracks) with columns trimmed to
+   `frame,x,y,particle`, so it is a subset of this set. Caveats for the methods: these are
+   validated positives picked from the old pipeline's output (not exhaustive annotation),
+   so they support recall and "would the cull remove a known-good track" checks, not
+   precision. Add a Phase 3 step: copy them to `ground_truth/` (trimmed columns, one
+   file per movie, plus a README on provenance), then re-run the `--gt` calibration and
+   traccuracy recall across all 32 movies. This also addresses TODO Tier 2 "expand
+   ground truth".
