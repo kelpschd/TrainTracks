@@ -165,6 +165,10 @@ Items in a tier are roughly ordered; tiers are not.
       scikit-image 0.26 and removed in 0.28 (FutureWarning seen 2026-11-19). `disk` is
       symmetric, so `skimage.morphology.dilation` should be equivalent; swap it and confirm
       with `check_regression.py tracking`. Until then keep scikit-image < 0.28 in the pin.
+- [ ] `batch_lyso_interaction.py` calls `skimage.morphology.remove_small_objects(min_size=...)`, deprecated in
+      scikit-image 0.26 (FutureWarning seen 2026-11-19; removal in 2.0 or later). The replacement
+      `max_size` removes objects smaller than OR EQUAL to its value, so a plain rename would change results:
+      use `max_size = min_size - 1`. Keep scikit-image pinned (0.26.x) until this is swapped and re-verified.
 - [ ] `compute_optical_flow` hard-codes channel 0; use `blob_channel`.
 - [ ] Legacy `flow.zarr/flow_raw` is (T, ...) with a zero last frame; new
       pipeline writes (T-1, ...). Regenerate the legacy one or note it.
