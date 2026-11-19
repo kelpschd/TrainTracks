@@ -2,7 +2,7 @@
 
 Frozen reference: git tag `pre-cleanup-2026-11-19` (commit 7bb84e0).
 Sources: `scripts/track_flow_score.py`, `scripts/batch_rescore_tracks.py`,
-`scripts/batch_pipeline_with_posthoc.py`, TODO.md "Batch state notes (2026-10-26)",
+`scripts/batch_pipeline.py`, TODO.md "Batch state notes (2026-10-26)",
 and the cotracking notes. Items marked CONFIRM could not be checked from the repo
 alone (they depend on files in `tracking_batch_TrainTracks`).
 
@@ -33,7 +33,7 @@ State this in the methods.
 
 ## Turn-definition mismatch: what it does and does not affect
 
-`batch_pipeline_with_posthoc.py:777` computes its own `turn_incoherence` as the mean
+`batch_pipeline.py:777` computes its own `turn_incoherence` as the mean
 unsigned angle over ALL steps (pauses included). That is a different quantity from the
 scorer's. Because `tracks_clean.geff` was regenerated from the scorer, the final
 cleaned tracks use the calibrated definition. What is still affected:

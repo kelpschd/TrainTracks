@@ -3,7 +3,7 @@
 Visualize tracks colored by path_straightness to pick a transport filter threshold.
 
 Works with both the single-run layout (candidate_graph.py) and the batch layout
-(batch_pipeline_with_posthoc.py).
+(batch_pipeline.py).
 
 Single-run usage:
     python batch_straightness_review.py \\

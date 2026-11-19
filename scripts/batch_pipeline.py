@@ -127,6 +127,17 @@ TRACKING_PARAMS = dict(
 
 LONG_TRACK_MIN_FRAMES = 10
 
+# Post-hoc track filtering (from track_flow_score.py).
+MIN_SPAN_FOR_SCORE = 5
+MIN_SPAN_KEEP = 5
+MIN_EDGES_FOR_STATS = 2
+TURN_FLAG_RADIANS = 1.4
+COMPOSITE_WEIGHTS = dict(
+    residual_var=1.0,
+    turn_incoherence=1.0,
+    cumulative_drift=1.0,
+)
+
 
 # ============================================================================
 # Helpers
@@ -561,6 +572,24 @@ def solve_tracks(cand_graph: nx.DiGraph, params: dict) -> nx.DiGraph:
 # ============================================================================
 
 
+
+def annotate_solution_track_ids(solution_nx: nx.DiGraph) -> nx.DiGraph:
+    """Persist the same canonical geometry-derived track ID on every node."""
+    df = solution_to_track_df(solution_nx)
+    if df.empty:
+        return solution_nx
+    # Match rows back to solution nodes by (t, y, x). Coordinates originate in
+    # the solution graph, so this mapping is exact for a freshly solved graph.
+    lookup = {}
+    for pid, group in df.groupby("particle"):
+        for row in group.itertuples(index=False):
+            lookup[(int(row.frame), float(row.y), float(row.x))] = int(pid)
+    for node, data in solution_nx.nodes(data=True):
+        key = (int(data["t"]), float(data["y"]), float(data["x"]))
+        data["track_id"] = lookup[key]
+        data["tracklet_id"] = lookup[key]
+    return solution_nx
+
 def track_metrics(solution_nx: nx.DiGraph, long_min_frames: int) -> dict:
     n_nodes = solution_nx.number_of_nodes()
     n_edges = solution_nx.number_of_edges()
@@ -614,6 +643,244 @@ def track_metrics(solution_nx: nx.DiGraph, long_min_frames: int) -> dict:
 
 
 # ============================================================================
+# Post-hoc flow scoring / filtering
+# ============================================================================
+
+
+def _unit(v: np.ndarray):
+    n = np.linalg.norm(v)
+    return v / n if n > 1e-8 else None
+
+
+def make_flow_sampler(flow_raw: np.ndarray):
+    """Return flow_vec(t, y, x) -> (dy, dx), matching candidate_graph."""
+    T, Y, X, _ = flow_raw.shape
+
+    def flow_vec(t: int, y: float, x: float):
+        tt = min(max(int(t), 0), T - 1)
+        yy = min(max(int(round(y)), 0), Y - 1)
+        xx = min(max(int(round(x)), 0), X - 1)
+        v = flow_raw[tt, yy, xx]
+        return float(v[1]), float(v[0])
+
+    return flow_vec
+
+
+
+
+def canonical_track_id(group: pd.DataFrame) -> int:
+    """Return a deterministic ID for a track from its frame/position sequence.
+
+    The ID is independent of funtracks' imported ``tracklet_id`` ordering, so
+    the same unchanged trajectory gets the same particle ID in tracks.geff,
+    flow_scores.csv, and tracks_clean.geff.
+    """
+    import hashlib
+
+    g = group.sort_values("frame")[["frame", "y", "x"]].copy()
+    # Stable byte representation; 1e6 precision is far below localization
+    # precision here while avoiding incidental float serialization differences.
+    payload = [
+        (int(r.frame), int(round(float(r.y) * 1_000_000)), int(round(float(r.x) * 1_000_000)))
+        for r in g.itertuples(index=False)
+    ]
+    digest = hashlib.sha1(repr(payload).encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big") & ((1 << 63) - 1)
+
+
+def assign_canonical_track_ids(track_df: pd.DataFrame) -> pd.DataFrame:
+    """Replace particle IDs with deterministic geometry-based IDs."""
+    df = track_df.copy().sort_values(["particle", "frame"]).reset_index(drop=True)
+    id_map = {
+        int(old): canonical_track_id(group)
+        for old, group in df.groupby("particle", sort=False)
+    }
+    df["particle"] = df["particle"].astype(int).map(id_map).astype("int64")
+    return df.sort_values(["particle", "frame"]).reset_index(drop=True)
+
+
+def solution_to_track_df(solution_nx: nx.DiGraph) -> pd.DataFrame:
+    """Convert solved NetworkX graph to rows with stable track IDs."""
+    if solution_nx.number_of_nodes() == 0:
+        return pd.DataFrame(columns=["particle", "frame", "y", "x"])
+
+    rows = []
+    for old_pid, comp in enumerate(nx.weakly_connected_components(solution_nx)):
+        for node in comp:
+            d = solution_nx.nodes[node]
+            rows.append({
+                "particle": old_pid,
+                "frame": int(d["t"]),
+                "y": float(d["y"]),
+                "x": float(d["x"]),
+            })
+    return assign_canonical_track_ids(
+        pd.DataFrame(rows).sort_values(["particle", "frame"]).reset_index(drop=True)
+    )
+
+
+def score_track(group: pd.DataFrame, flow_vec) -> dict:
+    """Compute the same post-hoc motion-consistency features as track_flow_score.py."""
+    g = group.sort_values("frame").reset_index(drop=True)
+    n = len(g)
+    frames = g["frame"].to_numpy()
+    ys = g["y"].to_numpy()
+    xs = g["x"].to_numpy()
+    span = int(frames[-1] - frames[0] + 1)
+    n_edges = n - 1
+
+    base = dict(
+        n_nodes=n,
+        n_edges=n_edges,
+        span=span,
+        mean_residual=np.nan,
+        residual_var=np.nan,
+        turn_incoherence=np.nan,
+        cumulative_drift=np.nan,
+        max_step_gap=0,
+        frac_skip=np.nan,
+    )
+    if n_edges < 1:
+        return base
+
+    residuals = []
+    velocities = []
+    gaps = []
+
+    for i in range(n_edges):
+        t0 = int(frames[i])
+        gap = max(int(frames[i + 1] - frames[i]), 1)
+        gaps.append(gap)
+
+        disp = np.array([ys[i + 1] - ys[i], xs[i + 1] - xs[i]])
+        vel = disp / gap
+        velocities.append(vel)
+
+        pred_steps = []
+        pos = np.array([ys[i], xs[i]])
+        for k in range(gap):
+            fdy, fdx = flow_vec(t0 + k, pos[0], pos[1])
+            f = np.array([fdy, fdx])
+            pred_steps.append(f)
+            pos = pos + f
+        pred_vel = np.mean(pred_steps, axis=0)
+        residuals.append(float(np.linalg.norm(vel - pred_vel)))
+
+    residuals = np.asarray(residuals)
+    gaps = np.asarray(gaps)
+
+    base["mean_residual"] = float(np.mean(residuals))
+    if n_edges >= MIN_EDGES_FOR_STATS:
+        base["residual_var"] = float(np.var(residuals))
+
+        angles = []
+        for i in range(n_edges - 1):
+            a = _unit(velocities[i])
+            b = _unit(velocities[i + 1])
+            if a is None or b is None:
+                continue
+            cos = np.clip(np.dot(a, b), -1.0, 1.0)
+            angles.append(float(np.arccos(cos)))
+        base["turn_incoherence"] = float(np.mean(angles)) if angles else np.nan
+
+    # Integrate flow from the first point over the full track span.
+    pos = np.array([ys[0], xs[0]])
+    t = int(frames[0])
+    for gap in gaps:
+        for k in range(int(gap)):
+            fdy, fdx = flow_vec(t + k, pos[0], pos[1])
+            pos = pos + np.array([fdy, fdx])
+        t += int(gap)
+    actual_end = np.array([ys[-1], xs[-1]])
+    base["cumulative_drift"] = float(
+        np.linalg.norm(pos - actual_end) / max(span - 1, 1)
+    )
+    base["max_step_gap"] = int(gaps.max())
+    base["frac_skip"] = float(np.mean(gaps > 1))
+    return base
+
+
+def _zscore(s: pd.Series) -> pd.Series:
+    mu = s.mean()
+    sd = s.std(ddof=0)
+    if sd < 1e-12:
+        return pd.Series(np.zeros(len(s)), index=s.index)
+    return (s - mu) / sd
+
+
+def score_all_tracks(track_df: pd.DataFrame, flow_vec) -> pd.DataFrame:
+    rows = []
+    for pid, group in track_df.groupby("particle"):
+        feat = score_track(group, flow_vec)
+        feat["particle"] = int(pid)
+        rows.append(feat)
+    if not rows:
+        return pd.DataFrame()
+    feats = pd.DataFrame(rows).set_index("particle")
+
+    eligible = (
+        (feats["span"] >= MIN_SPAN_FOR_SCORE)
+        & feats["residual_var"].notna()
+        & feats["turn_incoherence"].notna()
+    )
+    feats["eligible"] = eligible
+
+    comp = pd.Series(np.nan, index=feats.index)
+    if eligible.any():
+        z = pd.DataFrame(index=feats.index[eligible])
+        for col, weight in COMPOSITE_WEIGHTS.items():
+            z[col] = _zscore(feats.loc[eligible, col]) * weight
+        comp.loc[eligible] = z.sum(axis=1)
+    feats["suspect_score"] = comp
+    feats["flagged"] = eligible & (
+        feats["turn_incoherence"] >= TURN_FLAG_RADIANS
+    )
+    return feats.sort_values("suspect_score", ascending=False)
+
+
+def write_clean_geff(
+    track_df: pd.DataFrame,
+    feats: pd.DataFrame,
+    output_path: Path,
+) -> dict:
+    """Write final GEFF after short-track + turn-based post-hoc cuts."""
+    flagged_ids = set(feats.index[feats["flagged"]].astype(int))
+    short_ids = set(feats.index[feats["span"] < MIN_SPAN_KEEP].astype(int))
+    drop_ids = flagged_ids | short_ids
+
+    keep = track_df[~track_df["particle"].astype(int).isin(drop_ids)].copy()
+    keep = keep.sort_values(["particle", "frame"]).reset_index(drop=True)
+
+    g = nx.DiGraph()
+    next_id = 0
+    for pid, group in keep.groupby("particle"):
+        prev = None
+        for _, row in group.sort_values("frame").iterrows():
+            nid = next_id
+            next_id += 1
+            g.add_node(
+                nid,
+                t=int(row["frame"]),
+                y=float(row["y"]),
+                x=float(row["x"]),
+                track_id=int(pid),
+                tracklet_id=int(pid),
+            )
+            if prev is not None:
+                g.add_edge(prev, nid)
+            prev = nid
+
+    geff.write(g, str(output_path), zarr_format=3, overwrite=True)
+    return {
+        "n_flagged_tracks": len(flagged_ids),
+        "n_short_tracks": len(short_ids),
+        "n_tracks_removed": len(drop_ids),
+        "n_tracks_kept": int(keep["particle"].nunique()),
+        "n_detections_kept": int(len(keep)),
+    }
+
+
+# ============================================================================
 # Per-movie pipeline
 # ============================================================================
 
@@ -634,6 +901,8 @@ def process_movie(movie_path: Path, output_root: Path, overwrite: bool) -> dict:
     blobs_csv = movie_out / "blobs.csv"
     flow_zarr = movie_out / "flow.zarr"
     tracks_geff = movie_out / "tracks.geff"
+    flow_scores_csv = movie_out / "flow_scores.csv"
+    tracks_clean_geff = movie_out / "tracks_clean.geff"
     metadata_json = movie_out / "metadata.json"
 
     started = now_iso()
@@ -719,9 +988,38 @@ def process_movie(movie_path: Path, output_root: Path, overwrite: bool) -> dict:
     )
 
     if solution_nx.number_of_nodes() > 0:
+        annotate_solution_track_ids(solution_nx)
         geff.write(solution_nx, str(tracks_geff), zarr_format=3, overwrite=True)
     else:
         print("Warning: empty solution; no tracks.geff written")
+
+    # Post-hoc flow scoring + filtering. Keep the raw solver GEFF untouched.
+    posthoc = {
+        "n_flagged_tracks": 0,
+        "n_short_tracks": 0,
+        "n_tracks_removed": 0,
+        "n_tracks_kept": 0,
+        "n_detections_kept": 0,
+    }
+    if solution_nx.number_of_nodes() > 0:
+        print("Running post-hoc flow scoring / track filtering...")
+        track_df = solution_to_track_df(solution_nx)
+        flow_vec = make_flow_sampler(flow_raw)
+        feats = score_all_tracks(track_df, flow_vec)
+        feats.to_csv(flow_scores_csv)
+        print(f"Wrote flow scores: {flow_scores_csv}")
+
+        posthoc = write_clean_geff(
+            track_df, feats, tracks_clean_geff
+        )
+        print(
+            f"Post-hoc filter: flagged={posthoc['n_flagged_tracks']} | "
+            f"short={posthoc['n_short_tracks']} | "
+            f"removed={posthoc['n_tracks_removed']} | "
+            f"kept={posthoc['n_tracks_kept']}"
+        )
+    else:
+        print("Skipping post-hoc filtering for empty solution")
 
     record = {
         "run_id": run_id,
@@ -735,6 +1033,8 @@ def process_movie(movie_path: Path, output_root: Path, overwrite: bool) -> dict:
         "output_blobs_csv": str(blobs_csv),
         "output_flow_zarr": str(flow_zarr),
         "output_geff": str(tracks_geff),
+        "output_flow_scores_csv": str(flow_scores_csv),
+        "output_clean_geff": str(tracks_clean_geff),
         "image_shape": list(img_stack.shape),
         "n_blobs_raw": int(len(raw_blobs)),
         "n_blobs_input": int(len(blobs_df)),
@@ -743,6 +1043,14 @@ def process_movie(movie_path: Path, output_root: Path, overwrite: bool) -> dict:
         "detection_params": DETECTION_PARAMS,
         "flow_params": FLOW_PARAMS,
         "tracking_params": TRACKING_PARAMS,
+        "posthoc_params": {
+            "min_span_for_score": MIN_SPAN_FOR_SCORE,
+            "min_span_keep": MIN_SPAN_KEEP,
+            "min_edges_for_stats": MIN_EDGES_FOR_STATS,
+            "turn_flag_radians": TURN_FLAG_RADIANS,
+            "composite_weights": COMPOSITE_WEIGHTS,
+        },
+        "posthoc_results": posthoc,
     }
     write_json(metadata_json, record)
     print(f"Wrote: {metadata_json}")
@@ -772,6 +1080,12 @@ def write_summary(records: list[dict], path: Path) -> None:
         "n_skip_edges",
         "frac_skip_edges",
         "output_geff",
+        "output_clean_geff",
+        "n_flagged_tracks",
+        "n_short_tracks",
+        "n_tracks_removed",
+        "n_tracks_kept",
+        "n_detections_kept",
     ]
     with path.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")

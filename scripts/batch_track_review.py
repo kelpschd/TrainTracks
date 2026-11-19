@@ -187,7 +187,7 @@ def main():
     )
     parser.add_argument(
         "batch_root", type=Path,
-        help="Directory produced by batch_pipeline_with_posthoc.py",
+        help="Directory produced by batch_pipeline.py",
     )
     parser.add_argument(
         "--movie", required=True,
