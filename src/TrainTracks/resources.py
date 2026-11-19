@@ -12,9 +12,10 @@ described, not hard-coded. Each field is resolved in this order (first one that 
    75% of RAM, with ``threads_per_job = performance cores // jobs``.
 
 Memory per job depends on its threads, because detection holds one frame's blob-search arrays per
-thread. Measured on 33-frame 2048x2048x4 movies (2026-11-19): peak 3.3-3.5 GB at 2 threads, 8.8-9.5 GB
-at 8 threads, i.e. about ``1.6 + 0.9 * threads`` GB. That model is used unless ``mem_per_job_gb`` is
-set (flag, profile or ``[resources]``), which pins a fixed estimate instead.
+thread. Measured on 31-33-frame 2048x2048x4 movies (2026-11-19): peak 3.0-4.6 GB at 2 threads (all 32
+movies of the full run), 8.8-9.5 GB at 8 threads (3 movies), so the model is ``2.8 + 0.9 * threads`` GB
+(it sits at the top of what was measured). It is used unless ``mem_per_job_gb`` is set (flag, profile
+or ``[resources]``), which pins a fixed estimate instead.
 
 Example ``TrainTracks.toml``::
 
@@ -44,7 +45,7 @@ from dataclasses import dataclass
 
 MIN_THREADS_PER_JOB = 2
 RAM_FRACTION = 0.75
-MEM_BASE_GB = 1.6          # peak memory model, measured 2026-11-19 (see module docstring)
+MEM_BASE_GB = 2.8          # peak memory model, measured 2026-11-19 (see module docstring)
 MEM_PER_THREAD_GB = 0.9
 
 

@@ -16,18 +16,18 @@ python scripts/batch_pipeline.py --skip-existing       # resume: skip movies tha
 
 Automatic sizing: the largest `jobs <= performance cores // 2` whose estimated memory fits in 75% of
 RAM, and `threads_per_job = performance cores // jobs` (Apple Silicon efficiency cores are not counted).
-Memory per job is modelled from its threads, `about 1.6 + 0.9 * threads` GB, because detection holds one
+Memory per job is modelled from its threads, about `2.8 + 0.9 * threads` GB, because detection holds one
 frame's blob-search arrays per thread. Set `mem_per_job_gb` (flag, profile or `[resources]`) to pin a fixed
 value instead. Every movie's `metadata.json` records `peak_rss_gb` and `timings_seconds`, so the model can be
 checked against new data or hardware.
 
-Measured on a 12-core Mac (8 performance + 4 efficiency, 32 GB), 33-frame 2048 x 2048 x 4 movies:
+Measured on a 12-core Mac (8 performance + 4 efficiency, 32 GB), 31-33-frame 2048 x 2048 x 4 movies:
 
-| | 1 job x 8 threads | 3 jobs x 2 threads |
+| | 1 job x 8 threads (3 movies) | 4 jobs x 2 threads (all 32 movies) |
 |---|---|---|
-| peak memory per movie | 8.8 to 9.5 GB | 3.3 to 3.5 GB |
-| detection / flow / graph | 21 s / 47 s / 10 s | 61 s / 49 s / 10 s |
-| 3 small movies, wall clock | 4 min 02 s | 2 min 09 s |
+| peak memory per movie | 8.8 to 9.5 GB | 3.0 to 4.6 GB |
+| detection / flow / graph | 21 s / 47 s / 10 s | 65 s / 51 s / 11 s (means) |
+| wall clock | 4 min 02 s for 3 movies | **18 min 27 s for 32 movies** (98 min serial in September) |
 
 Detection is the only stage that uses threads; flow and the graph are single-threaded. So several movies at
 once beats more threads per movie, and memory (not cores) was what limited `--jobs`.

@@ -17,17 +17,17 @@ def test_pinned_memory_limits_jobs_then_cores():
     assert auto_jobs(Hardware(4, 2, 4.0), mem_per_job_gb=8.0) == 1  # never below 1
 
 
-def test_threads_based_memory_model_matches_the_measurements():
-    # measured 2026-11-19: 3.3-3.5 GB at 2 threads, 8.8-9.5 GB at 8 threads
-    assert 3.2 <= estimated_mem_gb(2) <= 3.6 and 8.5 <= estimated_mem_gb(8) <= 9.5
+def test_threads_based_memory_model_covers_the_measurements():
+    # measured 2026-11-19: peaks 3.0-4.6 GB at 2 threads (32 movies), 8.8-9.5 GB at 8 threads
+    assert 4.5 <= estimated_mem_gb(2) <= 5.0 and 9.5 <= estimated_mem_gb(8) <= 10.5
     assert auto_jobs(HW) == 4                                    # 12-core / 32 GB Mac: 4 jobs x 2 threads
-    assert auto_jobs(Hardware(8, 8, 16.0)) == 3                  # 16 GB: 3 jobs (3 x 2 threads' 3.4 GB fits 12 GB)
+    assert auto_jobs(Hardware(8, 8, 24.0)) == 3                  # 24 GB: 4 jobs would need 18.4 > 0.75 * 24
     assert auto_jobs(Hardware(64, 64, 256.0)) == 32              # a big node: limited by cores // 2
 
 
 def test_auto_threads_use_the_performance_cores():
     r = _res()
-    assert (r.jobs, r.threads_per_job) == (4, 2) and 3.2 <= r.mem_per_job_gb <= 3.6
+    assert (r.jobs, r.threads_per_job) == (4, 2) and 4.5 <= r.mem_per_job_gb <= 5.0
     assert _res(jobs=1).threads_per_job == 8
     assert _res(mem_per_job_gb=8).jobs == 3
 

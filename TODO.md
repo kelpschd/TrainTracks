@@ -132,7 +132,8 @@ Items in a tier are roughly ordered; tiers are not.
       2026-11-19: 61 tests pass; `check_regression.py tracking` on 1018 identical; fresh 1026 run 83 s
       (was 127 s), all outputs identical to the archive. The remaining graph time (about 10 s, my
       estimate: dilating 33 full frames + labelling) is not worth chasing yet.
-      Parallel test 2026-11-19 (3 small movies): `--jobs 1` vs `--jobs 3` outputs identical, also to the
+      Full fresh run 2026-11-19 (`--profile laptop`, 4 jobs x 2 threads): 32/32 ok in 18 min 27 s (was 98 min
+      serial in September); per movie 126-161 s; peak memory 3.0-4.6 GB per job. Parallel test 2026-11-19 (3 small movies): `--jobs 1` vs `--jobs 3` outputs identical, also to the
       archive; 4 min 02 s vs 2 min 09 s. Peak memory is 3.3-3.5 GB per job at 2 threads vs 8.8-9.5 GB at 8
       (detection holds one frame's arrays per thread); auto sizing now models that, giving 4 jobs x 2
       threads on the 12-core/32 GB Mac. Flow (47-50 s) is single-threaded at any thread count: candidate

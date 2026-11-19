@@ -444,10 +444,13 @@ def write_summary(records: list[dict], path: Path) -> None:
         "n_tracks_kept",
         "n_detections_kept",
     ]
+    # The post-hoc counts are stored under "posthoc_results"; lift them to the top level so they
+    # reach the columns above (they were silently blank before).
+    rows = [{**rec, **rec.get("posthoc_results", {})} for rec in records]
     with path.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")
         writer.writeheader()
-        writer.writerows(records)
+        writer.writerows(rows)
 
 
 def _movie_job(job: dict) -> dict:
