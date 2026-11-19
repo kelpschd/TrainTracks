@@ -254,8 +254,16 @@ def main():
 
     summary_path = batch_root / "batch_rescore_summary.csv"
     if rows:
-        pd.DataFrame(rows).to_csv(summary_path, index=False)
-        print(f"\nSaved summary: {summary_path}")
+        summary = pd.DataFrame(rows)
+        # A --movie run must not wipe the other movies' rows: merge by movie.
+        if summary_path.exists():
+            old = pd.read_csv(summary_path)
+            if "movie" in old.columns:
+                old = old[~old["movie"].isin(summary["movie"])]
+                summary = pd.concat([old, summary], ignore_index=True)
+                summary = summary.sort_values("movie").reset_index(drop=True)
+        summary.to_csv(summary_path, index=False)
+        print(f"\nSaved summary: {summary_path} ({len(summary)} movies)")
 
     if errors:
         error_path = batch_root / "batch_rescore_errors.csv"
