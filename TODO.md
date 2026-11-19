@@ -14,15 +14,17 @@ Items in a tier are roughly ordered; tiers are not.
       in one bin, so at 5 the pipeline cannot reproduce that track and it
       counts against recall. Add a one-line note on this in the methods.
 
-- [ ] **Unify the `turn_incoherence` definition.**
-      Batch pipeline = mean angle over all steps. `track_flow_score.py` =
-      pause-filtered (speed > 0.5 px/frame only), signed arctan2.
-      The 1.4 rad cutoff was calibrated with the scorer version, so the batch
-      pipeline applies it to a different quantity.
-      Pick one, make the other import it, then re-run `--gt` calibration and
-      regenerate `tracks_clean.geff` for every movie.
-      Files: `scripts/batch_pipeline.py:777`,
-      `scripts/track_flow_score.py:316`.
+- [x] **Unify the `turn_incoherence` definition.** (Code done 2026-11-19, cleanup
+      Phase 3.3.) One implementation now: `src/TrainTracks/scoring.py` (pause-filtered
+      mean |signed turn| between consecutive moving steps; the definition the 1.4 rad
+      cutoff was calibrated on). `batch_pipeline.py`, `batch_rescore_tracks.py` and
+      `track_flow_score.py` all import it; the pipeline's own all-steps scorer and the
+      three copies of `write_clean_geff` are gone. Pinned by `tests/test_scoring.py`.
+      Remaining check (needs real data, run locally): `python scripts/track_flow_score.py
+      --gt` should still report all 11 GT tracks unflagged, and a full
+      `batch_rescore_tracks.py` should still give 9425 eligible / 6895 flagged.
+      Existing `tracks_clean.geff` files already came from this definition, so they do
+      not need regenerating.
 
 - [x] **Fix track-ID handling.** (Done 2026-11-19, cleanup Phase 3.2.)
       `particle` is now sequential 1..N (ranked by `track_uid`) in newly generated

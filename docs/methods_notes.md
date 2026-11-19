@@ -31,20 +31,18 @@ clears any 5x5 px x/y bin with >= 5 detections over the movie
 7 frames in one bin, so the pipeline cannot reproduce it (counts against recall).
 State this in the methods.
 
-## Turn-definition mismatch: what it does and does not affect
+## turn_incoherence (unified in cleanup Phase 3.3, 2026-11-19)
 
-`batch_pipeline.py:777` computes its own `turn_incoherence` as the mean
-unsigned angle over ALL steps (pauses included). That is a different quantity from the
-scorer's. Because `tracks_clean.geff` was regenerated from the scorer, the final
-cleaned tracks use the calibrated definition. What is still affected:
-
-- the `posthoc_results` counts and `output_clean_geff` path stored in each movie's
-  `metadata.json` (stale, from 2026-09-30), read by `batch_traccuracy.py` and
-  `batch_track_review.py`;
-- anyone re-running the batch pipeline end to end, which would apply the 1.4 cutoff to
-  the other quantity.
-
-So this is a reproducibility problem more than a problem with the current results.
+There is now a single implementation, `TrainTracks.scoring`. Before, `batch_pipeline.py`
+computed its own `turn_incoherence` as the mean unsigned angle over ALL steps (pauses
+included), while the scorer (`track_flow_score.py`, used by `batch_rescore_tracks.py`
+to write the current `tracks_clean.geff`) used the pause-filtered version the 1.4 rad
+cutoff was calibrated on. The current cleaned tracks were always from the scorer, so
+results are unaffected; the old pipeline definition only affected the stale September
+`posthoc_results` in `metadata.json` (for sg100_Well5_1018: 557 flagged / 788 eligible
+then, versus 550 / 780 with the scorer) and would have affected a fresh end-to-end run.
+New pipeline runs record `turn_definition` and `pause_speed_px_per_frame` in
+`posthoc_params`.
 
 ## Track-ID handling (fixed in cleanup Phase 3.2, 2026-11-19)
 
@@ -77,6 +75,6 @@ with `batch_cotracking.py` (the analysis itself is unchanged).
 
 | Item | Option A (recommended) | Option B |
 |---|---|---|
-| turn_incoherence | Make the scorer the single definition; the pipeline imports it. Re-run `--gt` calibration once in Phase 3, then regenerate `tracks_clean`. Document as a code fix, no change to results expected. | Leave as is, document as a known limitation. |
+| turn_incoherence | DONE (Phase 3.3): the scorer is the single definition, imported by the pipeline. `--gt` calibration to be re-run locally; no change to results expected. | Leave as is, document as a known limitation. |
 | Track IDs | DONE (Phase 3.2): sequential ID plus string `track_uid`, join on `track_uid` only. | Document only. |
 | metadata.json staleness | `--write-clean` updates `posthoc_results` and `output_clean_geff` (small fix). | Regenerate metadata in the Phase 5 re-run. |

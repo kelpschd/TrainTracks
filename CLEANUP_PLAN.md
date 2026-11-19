@@ -59,7 +59,9 @@ Phase 0, 1, 2 done (2026-11-19). Phase 3 in progress:
   `geff_to_track_df` and 3 of the uid helpers (behaviour-identical; see tests/).
 - 3.2 done: sequential `particle` IDs, `track_uid` joins (straightness_review fixed),
   `track_uid` carried through cotracking tables.
-- Then: scorer + turn_incoherence unification, remaining shared functions, config, GT.
+- 3.3 done: `src/TrainTracks/scoring.py` is the only scorer / turn_incoherence /
+  clean-track rule; pipeline, rescore and track_flow_score import it.
+- Then: remaining shared functions (detection, flow, candidate graph), config, GT.
 
 ## Phases (do in order; commit after each)
 
