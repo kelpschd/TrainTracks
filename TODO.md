@@ -94,6 +94,12 @@ Items in a tier are roughly ordered; tiers are not.
       lock file.
 
 - [ ] **Replace hard-coded paths/run IDs with CLI args or one config file.**
+      (3.5a done 2026-11-19: `TrainTracks.config` (raw_root/results_root via CLI, env or
+      `TrainTracks.toml`); `batch_pipeline.py` uses it for default input/output and writes
+      relative paths in metadata.json; consumers (`resolve_raw_zarr`, `batch_track_review`,
+      `straightness_review`) read relative or old absolute paths; `track_flow_score.py` no
+      longer hard-codes the repo path. Still open: `batch_root` positional defaults for the
+      other batch scripts, legacy single-run viewers are archived.)
       Worst offenders: `candidate_graph.py`, `track_flow_score.py`,
       `preprocess_blob_det.py`, `optical_flow.py`, all `track_vis*.py`
       (`IMG_NUM = 9` selects the movie by glob order), `flow_vis.py`,

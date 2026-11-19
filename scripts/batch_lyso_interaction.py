@@ -44,6 +44,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import zarr
+from TrainTracks.config import resolve_input_zarr
 from TrainTracks.tracks_io import geff_to_track_df  # noqa: F401  (re-exported for B.geff_to_track_df users)
 from scipy import ndimage as ndi
 from scipy.ndimage import distance_transform_edt, gaussian_laplace
@@ -305,21 +306,10 @@ def summarize_track(group: pd.DataFrame, organelle: str) -> dict:
 
 
 def resolve_raw_zarr(movie_dir: Path, raw_root: Path | None) -> Path:
-    """Find the raw <movie>.zarr. Prefer metadata.json's input_zarr; else guess."""
+    """Find the raw <movie>.zarr (see TrainTracks.config.resolve_input_zarr)."""
     meta_path = movie_dir / "metadata.json"
-    if meta_path.exists():
-        meta = json.loads(meta_path.read_text())
-        iz = meta.get("input_zarr")
-        if iz and Path(iz).exists():
-            return Path(iz)
-    # Fall back to raw_root / <movie>.zarr
-    candidate = (raw_root or movie_dir.parent.parent) / f"{movie_dir.name}.zarr"
-    if candidate.exists():
-        return candidate
-    raise FileNotFoundError(
-        f"Could not locate raw zarr for {movie_dir.name} "
-        f"(checked metadata.json input_zarr and {candidate})"
-    )
+    meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+    return resolve_input_zarr(meta, movie_dir, raw_root)
 
 
 def segment_stack(img_stack: np.ndarray) -> tuple[np.ndarray, np.ndarray, list[dict]]:

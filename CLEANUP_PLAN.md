@@ -64,8 +64,11 @@ Phase 0, 1, 2 done (2026-11-19). Phase 3 in progress:
 - 3.4 done + verified on sg100_Well5_1018: detection (blobs.csv identical), flow (bit-identical),
   tracking (identical 3205 tracks); `src/TrainTracks/{detection,flow,tracking,scoring,ids,tracks_io}.py`;
   `scripts/check_regression.py detection|flow|tracking` is the safety net. 28 tests pass.
-- Next: 3.5 config (`raw_root`/`results_root`, relative paths in metadata.json), GT expansion
-  (Phase 3 GT step), then Phase 3b migration.
+- 3.5a done in code (awaiting local check): `src/TrainTracks/config.py` (raw_root/results_root via CLI,
+  env or `TrainTracks.toml`); results folder is named `results` (decided); batch_pipeline writes relative
+  paths in metadata.json; consumers read relative or old absolute.
+- Next: GT expansion (copy the 32 `*_valid_tracks.csv`), `batch_root` defaults for the other batch
+  scripts, then Phase 3b migration.
 
 ## Phases (do in order; commit after each)
 
@@ -108,11 +111,11 @@ every `pipeline/` step; replace the per-script `--output_dir` defaults and the
 hard-coded `/Users/...` paths. Make `metadata.json` store paths relative to
 `results_root` (today they are absolute and stale: they point to
 `DS/raw_data/tracking_batch/...`, which was later renamed). Then, with write access
-or by hand: create `DS/<results folder>/`, move the contents of
+or by hand: create `DS/results/`, move the contents of
 `DS/tracking_batch_TrainTracks/` there (the existing per-movie layout can be kept as is),
 move the repo's `flow.zarr` into `sg100_Well5_1018/archived_flow/` (if not already done), and move `analysis_20261026.qmd`/`Output_graphs` out
 of the batch folder (qmd to `analysis/` in the repo, figures to
-`<results folder>/figures/`). The qmd reads from its own folder with relative paths, so
+`results/figures/`). The qmd reads from its own folder with relative paths, so
 it needs a `results_root` parameter at the top. Confirm with a dry run on one movie
 before moving the rest, and leave the old batch folder in place until Phase 5's
 re-run reproduces the headline numbers.
@@ -154,7 +157,7 @@ confirm renames only; grep for the old script names and `/Users/dankelpsch/` pat
    folders:
    - `DS/raw_data/`: the `.nd2` files AND their `.zarr` conversions (written by
      `import_export.py`, which already writes next to the `.nd2`). Nothing else.
-   - `DS/<results folder>/` (name to be chosen; new, clean): EVERY pipeline output,
+   - `DS/results/` (new, clean; name decided 2026-11-19): EVERY pipeline output,
      both zarr and csv: per-movie blobs, flow.zarr, tracks / tracks_clean geff,
      flow_scores, organelle and coloc tables, cotracking tables, per-movie
      metadata.json, plus batch-level summaries, traccuracy outputs and figures.

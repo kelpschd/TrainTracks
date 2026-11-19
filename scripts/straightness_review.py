@@ -28,6 +28,7 @@ import napari
 import numpy as np
 import pandas as pd
 import zarr
+from TrainTracks.config import resolve_input_zarr, resolve_stored_path
 from TrainTracks.ids import add_track_uids
 from TrainTracks.tracks_io import geff_to_track_df
 
@@ -67,7 +68,9 @@ def resolve_paths(args) -> tuple[Path, Path, Path, Path]:
                 "Pass --flow explicitly."
             )
         meta = read_json(meta_path)
-        flow_path = Path(meta.get("flow_path") or meta.get("output_flow_zarr", ""))
+        flow_path = resolve_stored_path(
+            meta.get("flow_path") or meta.get("output_flow_zarr", ""), run_dir.parent
+        )
         if not flow_path.exists():
             raise FileNotFoundError(
                 f"flow.zarr not found at {flow_path}. Pass --flow explicitly."
@@ -146,7 +149,10 @@ def main():
         meta_path = run_dir / "metadata.json"
         if meta_path.exists():
             meta = read_json(meta_path)
-            img_path = Path(meta.get("input_zarr", ""))
+            try:
+                img_path = resolve_input_zarr(meta, run_dir)
+            except FileNotFoundError:
+                img_path = None
     if img_path is None or not img_path.exists():
         raise FileNotFoundError(
             f"Image zarr not found at {img_path}. Pass --image explicitly."

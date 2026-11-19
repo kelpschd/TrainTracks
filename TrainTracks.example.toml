@@ -1,0 +1,8 @@
+# Copy to TrainTracks.toml (gitignored) and edit. Both folders live side by side under the
+# dataset root. Command-line flags and the TRAINTRACKS_RAW_ROOT / TRAINTRACKS_RESULTS_ROOT
+# environment variables override these values.
+[paths]
+# nd2 files and their .zarr conversions (written by scripts/import_export.py); nothing else
+raw_root = "/Users/you/Documents/DataTecnica/TTU/Data/Sphere/220725_i11w-hT-M33-I76_sg1035_d10sphere/raw_data"
+# every pipeline output, zarr and csv, one folder per movie
+results_root = "/Users/you/Documents/DataTecnica/TTU/Data/Sphere/220725_i11w-hT-M33-I76_sg1035_d10sphere/results"

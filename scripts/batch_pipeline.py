@@ -55,6 +55,7 @@ import cv2
 import geff
 import numpy as np
 import zarr
+from TrainTracks.config import load_paths, to_relative
 from TrainTracks.detection import run_detection
 from TrainTracks.flow import compute_optical_flow, write_flow_zarr
 from TrainTracks.tracking import (
@@ -307,14 +308,17 @@ def process_movie(movie_path: Path, output_root: Path, overwrite: bool) -> dict:
         "reference_run_note": REFERENCE_RUN_NOTE,
         "timestamp_start": started,
         "timestamp_end": now_iso(),
-        "input_zarr": str(movie_path),
+        # Paths are stored relative (input_zarr: file name under raw_root; output_*: relative to
+        # the results root) so moving/renaming a folder cannot leave stale absolute paths.
+        "path_schema": "relative-v1",
+        "input_zarr": movie_path.name,
         "zarr_array_key": ZARR_ARRAY_KEY,
-        "output_dir": str(movie_out),
-        "output_blobs_csv": str(blobs_csv),
-        "output_flow_zarr": str(flow_zarr),
-        "output_geff": str(tracks_geff),
-        "output_flow_scores_csv": str(flow_scores_csv),
-        "output_clean_geff": str(tracks_clean_geff),
+        "output_dir": to_relative(movie_out, output_root),
+        "output_blobs_csv": to_relative(blobs_csv, output_root),
+        "output_flow_zarr": to_relative(flow_zarr, output_root),
+        "output_geff": to_relative(tracks_geff, output_root),
+        "output_flow_scores_csv": to_relative(flow_scores_csv, output_root),
+        "output_clean_geff": to_relative(tracks_clean_geff, output_root),
         "image_shape": list(img_stack.shape),
         "n_blobs_raw": int(len(raw_blobs)),
         "n_blobs_input": int(len(blobs_df)),
@@ -384,13 +388,15 @@ def main() -> int:
     parser.add_argument(
         "input_dir",
         type=Path,
-        help="Folder containing *.zarr movie directories",
+        nargs="?",
+        default=None,
+        help="Folder containing *.zarr movie directories (default: raw_root from the config)",
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
         default=None,
-        help="Output root (default: <input_dir>/tracking_batch)",
+        help="Output root (default: results_root from the config, else <input_dir>/tracking_batch)",
     )
     parser.add_argument(
         "--overwrite",
@@ -404,15 +410,22 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    input_dir = args.input_dir.expanduser().resolve()
+    cfg = load_paths(require=False)
+    if args.input_dir is not None:
+        input_dir = args.input_dir.expanduser().resolve()
+    elif cfg is not None:
+        input_dir = cfg.raw_root
+    else:
+        parser.error("input_dir not given and raw_root is not configured (see TrainTracks.example.toml)")
     if not input_dir.is_dir():
         parser.error(f"Input directory not found: {input_dir}")
 
-    output_dir = (
-        args.output_dir.expanduser().resolve()
-        if args.output_dir is not None
-        else input_dir / "tracking_batch"
-    )
+    if args.output_dir is not None:
+        output_dir = args.output_dir.expanduser().resolve()
+    elif cfg is not None:
+        output_dir = cfg.results_root
+    else:
+        output_dir = input_dir / "tracking_batch"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     movies = resolve_movie_dirs(input_dir)

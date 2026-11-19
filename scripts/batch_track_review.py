@@ -32,6 +32,7 @@ import napari
 import numpy as np
 import pandas as pd
 import zarr
+from TrainTracks.config import resolve_input_zarr
 from TrainTracks.tracks_io import geff_to_track_df
 
 DEFAULT_GT_ROOT = Path(
@@ -147,9 +148,7 @@ def main():
     meta = read_json(metadata_path)
     movie_id = movie_id_from_metadata(movie_dir, meta)
 
-    zarr_path = Path(meta["input_zarr"])
-    if not zarr_path.exists():
-        raise FileNotFoundError(f"Input Zarr not found: {zarr_path}")
+    zarr_path = resolve_input_zarr(meta, movie_dir)
 
     raw_geff = movie_dir / "tracks.geff"
     clean_geff = movie_dir / "tracks_clean.geff"

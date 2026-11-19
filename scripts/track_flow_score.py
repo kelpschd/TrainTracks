@@ -25,6 +25,7 @@ import pandas as pd
 import zarr
 from funtracks.import_export import import_from_geff
 from TrainTracks import scoring
+from TrainTracks.config import load_paths
 from TrainTracks.scoring import (
     MIN_SPAN_FOR_SCORE, MIN_SPAN_KEEP, TURN_FLAG_RADIANS,
     make_flow_sampler, score_all, score_track,
@@ -36,16 +37,17 @@ from TrainTracks.tracks_io import solution_tracks_to_track_df
 # CONFIG
 # ============================================================================
 
-BASE = Path("/Users/kelpschdj/Documents/DataTecnica/TTU/TrainTracks")
+BASE = Path(__file__).resolve().parents[1]   # repo root
+_CFG = load_paths(require=False)           # raw_root / results_root, see TrainTracks.config
 RUNS_DIR = BASE / "tracking_runs" / "runs"
-IMAGES_DIR = Path(
+IMAGES_DIR = _CFG.raw_root if _CFG else Path(
     "/Users/kelpschdj/Documents/DataTecnica/TTU/Data/Sphere/"
     "220725_i11w-hT-M33-I76_sg1035_d10sphere/raw_data"
 )
 # Flow field used for scoring (--gt uses it for the GT movie). Default: the batch
 # pipeline's flow for sg100_Well5_1018 (T-1 frames). Override with --flow.
 # (The old repo-root flow.zarr was archived on 2026-11-19.)
-FLOW_PATH = (IMAGES_DIR.parent / "tracking_batch_TrainTracks"
+FLOW_PATH = ((_CFG.results_root if _CFG else IMAGES_DIR.parent / "tracking_batch_TrainTracks")
              / "sg100_Well5_1018" / "flow.zarr")
 IMG_NUM = 9
 
