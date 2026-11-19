@@ -398,7 +398,8 @@ def main():
 
     movie_dirs = sorted(
         p for p in batch_root.iterdir()
-        if p.is_dir() and p.name != "traccuracy"
+        # movie folders only (the batch root also holds cotracking/, Output_graphs/, ...)
+        if p.is_dir() and (p / "metadata.json").exists()
     )
     if args.movie:
         requested = set(args.movie)

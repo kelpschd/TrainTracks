@@ -64,11 +64,22 @@ Items in a tier are roughly ordered; tiers are not.
       `batch_traccuracy.py`, `batch_track_review.py` and `straightness_review.py` default
       to it (their old default pointed at `tracking_results/`, since renamed).
       `scripts/calibrate_cull_on_gt.py` checks the turn cutoff on every movie.
-- [ ] **Re-run `batch_traccuracy.py` on the CURRENT `tracks_clean.geff`.** The stored
-      `traccuracy/` results are from 2026-09-30, i.e. the old pipeline's clean tracks (before
-      the 10-26 rebuild with the calibrated scorer). They gave node recall 0.78 raw / 0.48
-      clean over the 32 movies (precision not meaningful, GT is positives only), which no
-      longer describes the final tracks.
+- [x] **Re-run `batch_traccuracy.py` on the CURRENT `tracks_clean.geff`.** (Done 2026-11-19.) The
+      re-run gives the SAME pooled result as the stored 2026-09-30 one (clean: node recall
+      0.484 = 1955/4040, edge recall 0.432 = 1618/3746, 2903 clean tracks; raw: 0.779 / 0.644,
+      41268 tracks), so the 10-26 rebuild did not touch any GT track. The batch script used to
+      treat every folder in the batch root as a movie (3 spurious errors); fixed.
+- [ ] **Decide the cull cutoff before the Phase 5 re-run.** `calibrate_cull_on_gt.py` on all 32
+      movies (2026-11-19): at 1.4, 5 of 294 GT tracks (1.7%) are flagged (turns 1.71, 1.53, 1.48,
+      1.40, 1.40); 2 at 1.5, 1 at 1.57. The earlier single-movie check (max GT turn 0.69) was too
+      optimistic. Only 478 of the 41268 tracks lie between 1.4 and 1.5 (801 up to 1.57), because
+      the turn distribution is bimodal (6094 of the 6895 flagged tracks are above 1.57), so
+      the cutoff choice matters little for the final track set. Keeping 1.4 is defensible if the
+      methods state the 1.7% GT loss; 1.5 keeps 3 more GT tracks for 478 more clean tracks.
+- [ ] **Understand the GT recall loss.** Pooled over 32 movies, node recall drops from 0.78 (raw) to
+      0.48 (clean) but the turn flag only removes 5 of 294 GT tracks; 31470 of 41268 raw tracks
+      (76%) have span < 5 and are dropped by `MIN_SPAN_KEEP`, so fragmentation into short
+      tracklets is the likely driver (not verified: needs GT-node-to-track matching).
 
 ## Tier 3 - reproducibility and structure
 

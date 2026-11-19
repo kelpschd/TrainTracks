@@ -86,8 +86,15 @@ from the previous pipeline's manually validated output. Positives only and selec
 the old pipeline's filters, so use it for recall and for checking that the cull does not remove
 known-good tracks; precision against it is not meaningful.
 
-The traccuracy summary stored with the batch (2026-09-30) used these files but the OLD
-`tracks_clean` (pipeline all-steps turn definition, before the 10-26 rebuild): node recall 0.78 /
-edge recall 0.64 for raw tracks and 0.48 / 0.43 for clean tracks, pooled over 32 movies
-(match threshold 15 px). Re-run `batch_traccuracy.py` before quoting GT recall for the final
-tracks.
+traccuracy against this GT (`batch_traccuracy.py`, match threshold 15 px, pooled over the 32
+movies, re-run 2026-11-19 on the current `tracks_clean.geff`; identical to the 2026-09-30 run):
+raw tracks node recall 0.779 (3147/4040), edge recall 0.644 (2412/3746), 41268 tracks; clean tracks
+node recall 0.484 (1955/4040), edge recall 0.432 (1618/3746), 2903 tracks. Precision is not
+meaningful (positives-only GT).
+
+Cull calibration over all 32 movies (`calibrate_cull_on_gt.py`, 294 GT tracks, all eligible):
+turn_incoherence of GT tracks has median 0.36, 90th percentile 0.93, 99th 1.41, maximum 1.71 rad.
+At the 1.4 cutoff 5 GT tracks (1.7%) are flagged (turns 1.71, 1.53, 1.48, 1.40, 1.40); 2 at 1.5; 1 at
+1.57 (the random-walk value is about pi/2 = 1.57). Of all 41268 tracks, 31470 have span < 5, 9425 are
+eligible and 6895 flagged (6094 of those above 1.57), leaving 2903 clean tracks with median span 6
+(2467 have span 5-9).
