@@ -62,9 +62,16 @@ def main() -> int:
     movies = lambda r: {p.parent.name for p in r.glob("*/metadata.json")}
     mo, mn = movies(old_root), movies(new_root)
     names = sorted((mo & mn) if not args.movie else set(args.movie))
-    for m in sorted(mo ^ mn):
-        print(f"NOT ON BOTH SIDES: {m} ({'old' if m in mo else 'new'} only)")
-    all_ok = not (mo ^ mn) or bool(args.movie)
+    if args.movie:  # compare only what was asked for; it must exist on both sides
+        missing = [m for m in names if m not in (mo & mn)]
+        for m in missing:
+            print(f"NOT ON BOTH SIDES: {m}")
+        names = [m for m in names if m in (mo & mn)]
+        all_ok = not missing
+    else:
+        for m in sorted(mo ^ mn):
+            print(f"NOT ON BOTH SIDES: {m} ({'old' if m in mo else 'new'} only)")
+        all_ok = not (mo ^ mn)
 
     for m in names:
         try:
