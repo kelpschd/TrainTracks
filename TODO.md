@@ -71,7 +71,10 @@ Items in a tier are roughly ordered; tiers are not.
 - [ ] **Move shared code into `src/TrainTracks/`** and import it everywhere
       (3.1 done 2026-11-19: `ids.py` = track_uid/canonical-ID helpers, `tracks_io.py` =
       `geff_to_track_df`; callers updated; tests in `tests/`. Still to move: scorer,
-      `build_candidate_graph`, `preprocess_stack`, `compute_optical_flow`):
+      3.4a done 2026-11-19: `detection.py` (preprocess_stack, detect_blobs_in_stack,
+      filter_dense_blobs, blobs_df_to_tyx, run_detection); check with
+      `scripts/check_regression.py detection <movie_dir>`. Still to move:
+      `build_candidate_graph`, `compute_optical_flow`):
       `geff_to_track_df` (5 copies), `score_track`/`score_all` (2),
       `track_uid_for_group`/`canonical_track_id` (3), `build_candidate_graph`,
       `preprocess_stack`, `compute_optical_flow`, `track_df_to_nx`.

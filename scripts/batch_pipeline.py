@@ -62,18 +62,13 @@ import pandas as pd
 import scipy.spatial
 import skimage.measure
 import zarr
+from TrainTracks.detection import run_detection
 from TrainTracks.ids import assign_sequential_track_ids
 from TrainTracks.scoring import (
     COMPOSITE_WEIGHTS, MIN_EDGES_FOR_STATS, MIN_SPAN_FOR_SCORE, MIN_SPAN_KEEP,
     PAUSE_SPEED_PX_PER_FRAME, TURN_FLAG_RADIANS,
     make_flow_sampler, score_all, write_clean_geff,
 )
-from dask import compute, delayed
-from dask.diagnostics import ProgressBar
-from scipy import ndimage as ndi
-from scipy.ndimage import median_filter
-from skimage import filters, morphology
-from skimage.feature import blob_log
 from skimage.morphology import binary_dilation, disk
 from skimage.exposure import equalize_adapthist
 
@@ -180,124 +175,6 @@ def resolve_movie_dirs(input_dir: Path) -> list[Path]:
 # ============================================================================
 # Blob detection
 # ============================================================================
-
-
-def preprocess_stack(
-    img_stack: np.ndarray,
-    blob_channel: int,
-    mask_channel: int,
-    median_filter_size: int,
-    min_object_size: int,
-    dilation_radius: int,
-    apply_mask: bool,
-) -> np.ndarray:
-    if img_stack.ndim != 4:
-        raise ValueError(f"Expected (T,C,Y,X); got {img_stack.shape}")
-    if blob_channel >= img_stack.shape[1]:
-        raise ValueError(
-            f"blob_channel={blob_channel} but image has {img_stack.shape[1]} channels"
-        )
-
-    mean_proj = np.mean(img_stack[:, blob_channel], axis=0)
-    background = median_filter(mean_proj, size=median_filter_size)
-
-    preprocessed = np.stack([
-        np.clip(frame - background, 0, None).astype(np.uint16)
-        for frame in img_stack[:, blob_channel]
-    ])
-
-    if apply_mask:
-        if mask_channel >= img_stack.shape[1]:
-            raise ValueError(
-                f"mask_channel={mask_channel} but image has {img_stack.shape[1]} channels"
-            )
-        ch_mask_proj = np.max(img_stack[:, mask_channel], axis=0)
-        thresh = filters.threshold_otsu(ch_mask_proj)
-        binary = ch_mask_proj > thresh
-        filled = ndi.binary_fill_holes(binary)
-        large = morphology.remove_small_objects(
-            filled, min_size=min_object_size
-        )
-        dilated = morphology.binary_dilation(
-            large, disk(dilation_radius)
-        )
-        preprocessed *= dilated.astype(np.uint16)
-
-    return preprocessed
-
-
-def detect_blobs_in_stack(
-    image_stack: np.ndarray,
-    threshold: float,
-    min_sigma: float,
-    max_sigma: float,
-    gaussian_sigma: float,
-    normalize: bool,
-    use_gaussian_blur: bool,
-) -> pd.DataFrame:
-    @delayed
-    def process_frame(t, frame):
-        work = frame
-        if normalize:
-            work = (work - np.min(work)) / (
-                np.max(work) - np.min(work) + 1e-8
-            )
-        if use_gaussian_blur:
-            work = filters.gaussian(work, sigma=gaussian_sigma)
-        blobs = blob_log(
-            work,
-            min_sigma=min_sigma,
-            max_sigma=max_sigma,
-            threshold=threshold,
-        )
-        return [
-            {
-                "frame": t,
-                "x": x,
-                "y": y,
-                "size": sigma * np.sqrt(2),
-            }
-            for y, x, sigma in blobs
-        ]
-
-    tasks = [process_frame(t, frame) for t, frame in enumerate(image_stack)]
-    with ProgressBar():
-        results = compute(*tasks)
-    positions = [entry for sublist in results for entry in sublist]
-    return pd.DataFrame(positions)
-
-
-def filter_dense_blobs(
-    blob_df: pd.DataFrame,
-    bin_size: int,
-    blob_filter: int,
-) -> pd.DataFrame:
-    if len(blob_df) == 0:
-        return blob_df
-
-    rounded = blob_df.copy()
-    rounded["x_rounded"] = (rounded["x"] // bin_size * bin_size).astype(int)
-    rounded["y_rounded"] = (rounded["y"] // bin_size * bin_size).astype(int)
-
-    counts = (
-        rounded.groupby(["x_rounded", "y_rounded"])
-        .size()
-        .reset_index(name="count")
-    )
-    merged = rounded.merge(counts, on=["x_rounded", "y_rounded"])
-    return merged[merged["count"] < blob_filter].reset_index(drop=True)
-
-
-def blobs_df_to_tyx(df: pd.DataFrame) -> pd.DataFrame:
-    if len(df) == 0:
-        return pd.DataFrame(columns=["t", "y", "x"], dtype=int)
-    return pd.DataFrame(
-        {
-            "t": df["frame"].astype(int),
-            "y": np.round(df["y"]).astype(int),
-            "x": np.round(df["x"]).astype(int),
-        }
-    )
 
 
 # ============================================================================
@@ -704,30 +581,7 @@ def process_movie(movie_path: Path, output_root: Path, overwrite: bool) -> dict:
 
     # Detection
     print(f"Detecting blobs (threshold={DETECTION_PARAMS['threshold']})...")
-    pre = preprocess_stack(
-        img_stack,
-        blob_channel=DETECTION_PARAMS["blob_channel"],
-        mask_channel=DETECTION_PARAMS["mask_channel"],
-        median_filter_size=DETECTION_PARAMS["median_filter_size"],
-        min_object_size=DETECTION_PARAMS["min_object_size"],
-        dilation_radius=DETECTION_PARAMS["mask_dilation_radius"],
-        apply_mask=DETECTION_PARAMS["apply_mask"],
-    )
-    raw_blobs = detect_blobs_in_stack(
-        pre,
-        threshold=DETECTION_PARAMS["threshold"],
-        min_sigma=DETECTION_PARAMS["min_sigma"],
-        max_sigma=DETECTION_PARAMS["max_sigma"],
-        gaussian_sigma=DETECTION_PARAMS["gaussian_sigma"],
-        normalize=DETECTION_PARAMS["normalize"],
-        use_gaussian_blur=DETECTION_PARAMS["use_gaussian_blur"],
-    )
-    filtered_blobs = filter_dense_blobs(
-        raw_blobs,
-        bin_size=DETECTION_PARAMS["bin_size"],
-        blob_filter=DETECTION_PARAMS["blob_filter"],
-    )
-    blobs_df = blobs_df_to_tyx(filtered_blobs)
+    raw_blobs, blobs_df = run_detection(img_stack, DETECTION_PARAMS)
     blobs_df.to_csv(blobs_csv, index=False)
     print(f"Blobs: {len(raw_blobs)} raw -> {len(blobs_df)} after density filter")
 
