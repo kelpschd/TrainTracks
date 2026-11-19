@@ -35,3 +35,6 @@ dependencies = [
     "Pillow",
     "ome-zarr",
 ]
+
+[project.optional-dependencies]
+test = ["pytest"]

@@ -5,8 +5,8 @@ mitochondria tracks, for every movie in a tracking_batch folder.
 
 Per movie
 ---------
-  particle tracks : <batch_root>/<movie>/tracks_clean.geff   (same source and loader
-                    as batch_lyso_interaction.py, via geff_to_track_df)
+  particle tracks : <batch_root>/<movie>/tracks_clean.geff   (loaded with
+                    TrainTracks.tracks_io.geff_to_track_df)
   raw image       : <raw_root>/<movie>.zarr  (s0, (T, C, Y, X); ch1 lysosome, ch2 mito)
   organelle tracks: organelle_tracks.track_organelles()  -- your notebook's
                     segmentation / density filter / Kalman linking / net-displacement
@@ -51,7 +51,7 @@ import cotracking as ct  # noqa: E402
 
 
 def load_particle_tracks(movie_dir: Path) -> pd.DataFrame:
-    from batch_lyso_interaction import geff_to_track_df
+    from TrainTracks.tracks_io import geff_to_track_df
     df = geff_to_track_df(movie_dir / "tracks_clean.geff")
     return df[["frame", "x", "y", "particle"]].copy()
 

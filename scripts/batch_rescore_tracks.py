@@ -39,7 +39,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import zarr
-from funtracks.import_export import import_from_geff
+from TrainTracks.tracks_io import geff_to_track_df
 
 
 DEFAULT_SCORER = Path(__file__).with_name("track_flow_score.py")
@@ -57,15 +57,6 @@ def load_scorer(path: Path):
 def read_metadata(path: Path) -> dict:
     with path.open() as f:
         return json.load(f)
-
-
-def geff_to_track_df(scorer, geff_path: Path) -> pd.DataFrame:
-    sg = import_from_geff(
-        directory=str(geff_path),
-        node_name_map={"time": "t", "pos": ["y", "x"]},
-    )
-    # Reuse the user's current scorer conversion logic where available.
-    return scorer.geff_to_track_df(sg)
 
 
 def write_clean_geff(movie_dir: Path, track_df: pd.DataFrame, feats: pd.DataFrame, min_span_keep: int) -> dict:
@@ -135,7 +126,7 @@ def rescore_movie(movie_dir: Path, scorer, no_backup: bool = False, write_clean:
     flow_raw = np.asarray(flow_root["flow_raw"])
     flow_vec = scorer.make_flow_sampler(flow_raw)
 
-    track_df = geff_to_track_df(scorer, raw_geff)
+    track_df = geff_to_track_df(raw_geff)
     feats = scorer.score_all(track_df, flow_vec)
 
     if scores_path.exists() and not no_backup:

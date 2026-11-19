@@ -37,7 +37,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import traceback
 from pathlib import Path
@@ -45,14 +44,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import zarr
+from TrainTracks.tracks_io import geff_to_track_df  # noqa: F401  (re-exported for B.geff_to_track_df users)
 from scipy import ndimage as ndi
 from scipy.ndimage import distance_transform_edt, gaussian_laplace
 from scipy.spatial import cKDTree
 from scipy.stats import norm
 from skimage import filters, morphology
 from skimage.measure import label, regionprops
-
-from funtracks.import_export import import_from_geff
 
 
 # ============================================================================
@@ -146,44 +144,6 @@ def generate_mitochondria_mask(frame, intensity_scaling_param,
     combined = np.logical_or(log_mask, vessel_mask)
     mito = morphology.remove_small_objects(combined, min_size=min_mitochondria_area)
     return mito.astype(np.uint8)
-
-
-# ============================================================================
-# Track loading  (same pattern as track_flow_score.geff_to_track_df, with UID)
-# ============================================================================
-
-
-def track_uid_for_group(group: pd.DataFrame) -> str:
-    g = group.sort_values("frame")[["frame", "y", "x"]]
-    payload = [
-        (int(r.frame),
-         int(round(float(r.y) * 1_000_000)),
-         int(round(float(r.x) * 1_000_000)))
-        for r in g.itertuples(index=False)
-    ]
-    return hashlib.sha1(repr(payload).encode("utf-8")).hexdigest()
-
-
-def geff_to_track_df(geff_path: Path) -> pd.DataFrame:
-    sg = import_from_geff(
-        directory=str(geff_path),
-        node_name_map={"time": "t", "pos": ["y", "x"]},
-    )
-    attrs = sg.graph.node_attrs(unpack=True).to_pandas()
-    required = {"tracklet_id", "t", "pos_0", "pos_1"}
-    missing = required - set(attrs.columns)
-    if missing:
-        raise ValueError(f"{geff_path}: missing imported attributes {sorted(missing)}")
-    df = pd.DataFrame({
-        "particle": attrs["tracklet_id"].astype(int),
-        "frame": attrs["t"].astype(int),
-        "y": attrs["pos_0"].astype(float),
-        "x": attrs["pos_1"].astype(float),
-    }).sort_values(["particle", "frame"]).reset_index(drop=True)
-    uid_map = {int(pid): track_uid_for_group(g)
-               for pid, g in df.groupby("particle", sort=False)}
-    df["track_uid"] = df["particle"].astype(int).map(uid_map)
-    return df
 
 
 # ============================================================================

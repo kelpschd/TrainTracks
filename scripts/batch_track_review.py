@@ -26,14 +26,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import hashlib
 from pathlib import Path
 
 import napari
 import numpy as np
 import pandas as pd
 import zarr
-from funtracks.import_export import import_from_geff
+from TrainTracks.tracks_io import geff_to_track_df
 
 DEFAULT_GT_ROOT = Path(
     "/Users/kelpschdj/Documents/DataTecnica/TTU/Data/Sphere/"
@@ -52,86 +51,6 @@ def movie_id_from_metadata(movie_dir: Path, meta: dict) -> str:
         name = Path(input_zarr).name
         return name[:-5] if name.endswith(".zarr") else Path(name).stem
     return movie_dir.name
-
-
-
-
-def canonical_track_id(group: pd.DataFrame) -> int:
-    """Return a deterministic ID for a track from its frame/position sequence.
-
-    The ID is independent of funtracks' imported ``tracklet_id`` ordering, so
-    the same unchanged trajectory gets the same particle ID in tracks.geff,
-    flow_scores.csv, and tracks_clean.geff.
-    """
-    import hashlib
-
-    g = group.sort_values("frame")[["frame", "y", "x"]].copy()
-    # Stable byte representation; 1e6 precision is far below localization
-    # precision here while avoiding incidental float serialization differences.
-    payload = [
-        (int(r.frame), int(round(float(r.y) * 1_000_000)), int(round(float(r.x) * 1_000_000)))
-        for r in g.itertuples(index=False)
-    ]
-    digest = hashlib.sha1(repr(payload).encode("utf-8")).digest()
-    return int.from_bytes(digest[:8], "big") & ((1 << 63) - 1)
-
-
-def assign_canonical_track_ids(track_df: pd.DataFrame) -> pd.DataFrame:
-    """Replace particle IDs with deterministic geometry-based IDs."""
-    df = track_df.copy().sort_values(["particle", "frame"]).reset_index(drop=True)
-    id_map = {
-        int(old): canonical_track_id(group)
-        for old, group in df.groupby("particle", sort=False)
-    }
-    df["particle"] = df["particle"].astype(int).map(id_map).astype("int64")
-    return df.sort_values(["particle", "frame"]).reset_index(drop=True)
-
-
-def track_uid_for_group(group: pd.DataFrame) -> str:
-    """Same deterministic geometry UID used by track_flow_score.py."""
-    g = group.sort_values("frame")[["frame", "y", "x"]]
-    payload = [
-        (
-            int(r.frame),
-            int(round(float(r.y) * 1_000_000)),
-            int(round(float(r.x) * 1_000_000)),
-        )
-        for r in g.itertuples(index=False)
-    ]
-    return hashlib.sha1(repr(payload).encode("utf-8")).hexdigest()
-
-
-def add_track_uids(df: pd.DataFrame) -> pd.DataFrame:
-    out = df.copy()
-    uid_map = {
-        int(pid): track_uid_for_group(group)
-        for pid, group in out.groupby("particle", sort=False)
-    }
-    out["track_uid"] = out["particle"].astype(int).map(uid_map)
-    return out
-
-
-def geff_to_track_df(geff_path: Path) -> pd.DataFrame:
-    sg = import_from_geff(
-        directory=str(geff_path),
-        node_name_map={"time": "t", "pos": ["y", "x"]},
-    )
-    attrs = sg.graph.node_attrs(unpack=True).to_pandas()
-    required = {"tracklet_id", "t", "pos_0", "pos_1"}
-    missing = required - set(attrs.columns)
-    if missing:
-        raise ValueError(
-            f"{geff_path}: missing imported attributes {sorted(missing)}"
-        )
-    df = pd.DataFrame(
-        {
-            "particle": attrs["tracklet_id"].astype(int),
-            "frame": attrs["t"].astype(int),
-            "y": attrs["pos_0"].astype(float),
-            "x": attrs["pos_1"].astype(float),
-        }
-    )
-    return add_track_uids(df).sort_values(["particle", "frame"]).reset_index(drop=True)
 
 
 def track_spans(df: pd.DataFrame) -> pd.Series:

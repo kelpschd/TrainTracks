@@ -63,7 +63,10 @@ Items in a tier are roughly ordered; tiers are not.
       posthoc version, zero unique lines); `batch_pipeline_with_posthoc.py` was
       renamed to `batch_pipeline.py`. (Done 2026-11-19, cleanup Phase 1.)
 
-- [ ] **Move shared code into `src/TrainTracks/`** and import it everywhere:
+- [ ] **Move shared code into `src/TrainTracks/`** and import it everywhere
+      (3.1 done 2026-11-19: `ids.py` = track_uid/canonical-ID helpers, `tracks_io.py` =
+      `geff_to_track_df`; callers updated; tests in `tests/`. Still to move: scorer,
+      `build_candidate_graph`, `preprocess_stack`, `compute_optical_flow`):
       `geff_to_track_df` (5 copies), `score_track`/`score_all` (2),
       `track_uid_for_group`/`canonical_track_id` (3), `build_candidate_graph`,
       `preprocess_stack`, `compute_optical_flow`, `track_df_to_nx`.

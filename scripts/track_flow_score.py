@@ -19,13 +19,14 @@ from __future__ import annotations
 import json
 import argparse
 from pathlib import Path
-import hashlib
 
 import numpy as np
 import pandas as pd
 import zarr
 import geff
 from funtracks.import_export import import_from_geff
+from TrainTracks.ids import track_uid_for_group
+from TrainTracks.tracks_io import solution_tracks_to_track_df
 
 
 # ============================================================================
@@ -105,37 +106,6 @@ def load_run(run_id: str):
         node_name_map={"time": "t", "pos": ["y", "x"]},
     )
     return sg, meta
-
-
-def track_uid_for_group(group: pd.DataFrame) -> str:
-    g = group.sort_values("frame")[["frame", "y", "x"]]
-    payload = [
-        (int(r.frame), int(round(float(r.y) * 1_000_000)),
-         int(round(float(r.x) * 1_000_000)))
-        for r in g.itertuples(index=False)
-    ]
-    return hashlib.sha1(repr(payload).encode("utf-8")).hexdigest()
-
-
-def add_track_uids(track_df: pd.DataFrame) -> pd.DataFrame:
-    df = track_df.copy()
-    uid_map = {
-        int(pid): track_uid_for_group(group)
-        for pid, group in df.groupby("particle", sort=False)
-    }
-    df["track_uid"] = df["particle"].astype(int).map(uid_map)
-    return df
-
-
-def geff_to_track_df(sg) -> pd.DataFrame:
-    attrs = sg.graph.node_attrs(unpack=True).to_pandas()
-    df = pd.DataFrame({
-        "particle": attrs["tracklet_id"].astype(int),
-        "frame": attrs["t"].astype(int),
-        "y": attrs["pos_0"].astype(float),
-        "x": attrs["pos_1"].astype(float),
-    })
-    return add_track_uids(df).sort_values(["particle", "frame"]).reset_index(drop=True)
 
 
 # ============================================================================
@@ -678,7 +648,7 @@ def main():
         return
 
     sg, meta = load_run(args.run_id)
-    track_df = geff_to_track_df(sg)
+    track_df = solution_tracks_to_track_df(sg)
     print(f"Run {args.run_id}: {track_df['particle'].nunique()} tracks, "
           f"{len(track_df)} detections | "
           f"max_gap={meta.get('max_gap')} gap_penalty={meta.get('gap_penalty')} "

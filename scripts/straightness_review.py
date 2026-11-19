@@ -28,7 +28,7 @@ import napari
 import numpy as np
 import pandas as pd
 import zarr
-from funtracks.import_export import import_from_geff
+from TrainTracks.tracks_io import geff_to_track_df
 
 DEFAULT_CUTOFFS = [0.4, 0.5, 0.6, 0.7]
 
@@ -36,20 +36,6 @@ DEFAULT_CUTOFFS = [0.4, 0.5, 0.6, 0.7]
 def read_json(path: Path) -> dict:
     with path.open() as f:
         return json.load(f)
-
-
-def geff_to_track_df(geff_path: Path) -> pd.DataFrame:
-    sg = import_from_geff(
-        directory=str(geff_path),
-        node_name_map={"time": "t", "pos": ["y", "x"]},
-    )
-    attrs = sg.graph.node_attrs(unpack=True).to_pandas()
-    return pd.DataFrame({
-        "particle": attrs["tracklet_id"].astype(int),
-        "frame":    attrs["t"].astype(int),
-        "y":        attrs["pos_0"].astype(float),
-        "x":        attrs["pos_1"].astype(float),
-    }).sort_values(["particle", "frame"]).reset_index(drop=True)
 
 
 def tracks_array(df: pd.DataFrame) -> np.ndarray:

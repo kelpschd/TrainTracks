@@ -62,6 +62,7 @@ import pandas as pd
 import scipy.spatial
 import skimage.measure
 import zarr
+from TrainTracks.ids import assign_canonical_track_ids
 from dask import compute, delayed
 from dask.diagnostics import ProgressBar
 from scipy import ndimage as ndi
@@ -572,7 +573,6 @@ def solve_tracks(cand_graph: nx.DiGraph, params: dict) -> nx.DiGraph:
 # ============================================================================
 
 
-
 def annotate_solution_track_ids(solution_nx: nx.DiGraph) -> nx.DiGraph:
     """Persist the same canonical geometry-derived track ID on every node."""
     df = solution_to_track_df(solution_nx)
@@ -664,39 +664,6 @@ def make_flow_sampler(flow_raw: np.ndarray):
         return float(v[1]), float(v[0])
 
     return flow_vec
-
-
-
-
-def canonical_track_id(group: pd.DataFrame) -> int:
-    """Return a deterministic ID for a track from its frame/position sequence.
-
-    The ID is independent of funtracks' imported ``tracklet_id`` ordering, so
-    the same unchanged trajectory gets the same particle ID in tracks.geff,
-    flow_scores.csv, and tracks_clean.geff.
-    """
-    import hashlib
-
-    g = group.sort_values("frame")[["frame", "y", "x"]].copy()
-    # Stable byte representation; 1e6 precision is far below localization
-    # precision here while avoiding incidental float serialization differences.
-    payload = [
-        (int(r.frame), int(round(float(r.y) * 1_000_000)), int(round(float(r.x) * 1_000_000)))
-        for r in g.itertuples(index=False)
-    ]
-    digest = hashlib.sha1(repr(payload).encode("utf-8")).digest()
-    return int.from_bytes(digest[:8], "big") & ((1 << 63) - 1)
-
-
-def assign_canonical_track_ids(track_df: pd.DataFrame) -> pd.DataFrame:
-    """Replace particle IDs with deterministic geometry-based IDs."""
-    df = track_df.copy().sort_values(["particle", "frame"]).reset_index(drop=True)
-    id_map = {
-        int(old): canonical_track_id(group)
-        for old, group in df.groupby("particle", sort=False)
-    }
-    df["particle"] = df["particle"].astype(int).map(id_map).astype("int64")
-    return df.sort_values(["particle", "frame"]).reset_index(drop=True)
 
 
 def solution_to_track_df(solution_nx: nx.DiGraph) -> pd.DataFrame:
