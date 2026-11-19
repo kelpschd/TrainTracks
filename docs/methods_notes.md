@@ -52,9 +52,17 @@ funtracks renumbers `tracklet_id` / `particle` on every import, and 63-bit hashe
 collide in float64 (napari). Any join across tables must use the string `track_uid`.
 Known unsafe: `straightness_review.py:178` (silent empty join in the batch layout),
 and the `track_vis*` / `review_lyso_interaction.py` napari viewers.
-CONFIRM that the cotracking pipeline (`batch_cotracking.py`,
-`summarize_cotracking_velocity.py`) joins particle tracks to organelle episodes on
-`track_uid` and not on `particle`. This matters for the headline cotracking numbers.
+Cotracking checked 2026-11-19 (code read, not re-run): the headline numbers are NOT
+affected. `batch_cotracking.py` imports `tracks_clean.geff` once per movie via
+`geff_to_track_df`, writes `particle_tracks.csv` in that same run, and every downstream
+script (`summarize_cotracking_velocity.py`, `leading_trailing.py`,
+`length_matched_speed.py`) reads that CSV plus episodes written alongside it, so
+`particle` is only ever matched within one import. Remaining weakness: the loader keeps
+only `frame, x, y, particle` and drops `track_uid`, so cotracking results cannot be
+traced back to a specific track in `tracks_clean.geff` and `particle` IDs may differ
+between re-runs. Phase 3: carry `track_uid` through `particle_tracks.csv` and the
+episode tables, and make `batch_cotracking.py` import `geff_to_track_df` from
+`src/TrainTracks` instead of `batch_lyso_interaction`.
 
 ## Other facts to state or fix
 

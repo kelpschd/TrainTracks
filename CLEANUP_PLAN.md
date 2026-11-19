@@ -48,7 +48,8 @@ TrainTracks/
   archive/
     exploration_2026-09/ track_vis*, sweep_*, traccuracy_compare, flow_vis, vs_gt_matplotlib ...
     spotiflow_experiment/  (already self-contained; just move)
-    legacy_single_movie/ blobs/, flow.zarr, test_run_7.geff, root traccuracy CSVs, tracking_runs/
+    legacy_single_movie/ blobs/, test_run_7.geff, root traccuracy CSVs, tracking_runs/
+  (flow.zarr: not archived; moves to the external results root in Phase 3)
   TODO.md                tracked (remove from .gitignore)
 ```
 
@@ -70,13 +71,12 @@ copy). Delete `scripts/test_napari.py`. Delete `batch_pipeline.py` and rename
 (or `git add -f` them). Fix the README typo.
 
 **Phase 2 - Archive, don't delete.**
-Move the exploration scripts, legacy `blobs/`, `flow.zarr`, `test_run_7.geff`, root
+Move the exploration scripts, legacy `blobs/`, `test_run_7.geff`, root
 `traccuracy_*.csv`/`vs_gt_metrics.png` and `tracking_runs/` into `archive/` with a
 one-paragraph README each (what question it answered, date, how to re-run), following
 the style of `spotiflow_experiment/README.md`. Keep the two Spotiflow runs note from
-that README in sync when `tracking_runs/` moves. Check `flow.zarr` (1.2 GB) is not
-needed by anything in the final pipeline before deciding whether to keep it locally,
-move to external storage, or delete.
+that README in sync when `tracking_runs/` moves. `flow.zarr` is still needed: leave it
+in place for now and move it to the results root in Phase 3 when paths become config.
 
 **Phase 3 - Consolidate shared code into `src/TrainTracks/`.**
 Extract in this order, running the existing batch on one movie after each step and
@@ -105,9 +105,12 @@ Run one movie through the pipeline before and after and compare `tracks_clean`
 node/edge counts and the cotracking summary; `git diff --stat` the move commits to
 confirm renames only; grep for the old script names and `/Users/dankelpsch/` paths.
 
-## Open questions for you
-1. Where do `tracking_batch_TrainTracks` (the 32 movies) and `analysis_20261026.qmd`
-   live? They are outside this folder, so the plan assumes they stay put and get a
-   `data_paths` config entry.
-2. Is `flow.zarr` (1.2 GB legacy single-movie flow) still needed?
-3. Do you want the cleanup done on a branch (recommended) or directly on main?
+## Decisions (2026-11-19)
+1. Batch outputs (`tracking_batch_TrainTracks`) and `analysis_20261026.qmd` live
+   outside this repo, next to the raw data. They stay there; the repo gets a config
+   entry (`data_root` / `results_root`) instead of hard-coded paths.
+2. `flow.zarr` is still needed. Do not archive or delete it. In Phase 3 the pipeline
+   should write flow (and other large outputs) to the results root, not the repo.
+   Until then it stays in place (it is gitignored).
+3. Cleanup work happens on branch `cleanup/2026-11`; main keeps the pre-cleanup tag.
+4. turn_incoherence and track-ID fixes are done in Phase 3 (see docs/methods_notes.md).
