@@ -20,9 +20,10 @@ Items in a tier are roughly ordered; tiers are not.
       cutoff was calibrated on). `batch_pipeline.py`, `batch_rescore_tracks.py` and
       `track_flow_score.py` all import it; the pipeline's own all-steps scorer and the
       three copies of `write_clean_geff` are gone. Pinned by `tests/test_scoring.py`.
-      Remaining check (needs real data, run locally): `python scripts/track_flow_score.py
-      --gt` should still report all 11 GT tracks unflagged, and a full
-      `batch_rescore_tracks.py` should still give 9425 eligible / 6895 flagged.
+      Verified locally 2026-11-19: `pytest tests` 19 passed; `track_flow_score.py --gt`
+      leaves all 11 GT tracks unflagged (max GT turn 0.69 rad vs cutoff 1.4); full
+      `batch_rescore_tracks.py` on all 32 movies gives 41268 tracks / 9425 eligible /
+      6895 flagged, identical to before the refactor, movie by movie.
       Existing `tracks_clean.geff` files already came from this definition, so they do
       not need regenerating.
 
