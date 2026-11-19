@@ -11,11 +11,12 @@ steps for all movies; these scripts are what it grew out of.
 | `traccuracy_compare.py`, `traccuracy_runs_EdgeConstantSweep.py`, `vs_gt_matplotlib.py` | Compare runs against the 11-track GT; plot the result. Outputs are in `../legacy_single_movie/`. (`traccuracy_runs_EdgeConstantSweep.py` labels its keys `pen*` for what is an edge-constant sweep.) |
 | `track_vis.py`, `track_vis_FrameSweep.py`, `track_vis_thresholds.py`, `track_vis_extra.py` | Napari viewers for runs. `IMG_NUM = 9` selects the movie by glob order. |
 | `flow_vis.py` | Renders flow fields to RGB frames in `flow.zarr/flow_frames_XY`. |
+| `preprocess_blob_det.py`, `optical_flow.py` | Single-movie detection and optical-flow scripts (module-level, hard-coded paths). Superseded by `src/TrainTracks/detection.py` and `flow.py` (the batch-pipeline versions; `optical_flow.py` here lacks the temporal flow smoothing and writes T frames, not T-1). Archived 2026-11-19 (cleanup Phase 3.4c). |
 
 Known limitations (so nobody reuses them by accident): hard-coded `/Users/...` paths
 (`track_vis_extra.py` still has an old `/Users/dankelpsch/` path), 63-bit track hashes
 that collide when passed through float64 into napari, and the candidate graph merges
 detections within about 10 px (see TODO.md Tier 2).
 
-`spotiflow_experiment/scripts/` imports `traccuracy_compare` and `preprocess_blob_det`;
+`spotiflow_experiment/scripts/` imports `traccuracy_compare` and `preprocess_blob_det` (both now in this folder);
 see that folder's README for the PYTHONPATH to use.

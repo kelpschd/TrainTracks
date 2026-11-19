@@ -61,10 +61,12 @@ Phase 0, 1, 2 done (2026-11-19). Phase 3 in progress:
   `track_uid` carried through cotracking tables.
 - 3.3 done: `src/TrainTracks/scoring.py` is the only scorer / turn_incoherence /
   clean-track rule; pipeline, rescore and track_flow_score import it.
-- 3.4a done + verified: `src/TrainTracks/detection.py` (1018: 50928 raw -> 16055, blobs.csv
-  identical). 3.4b done in code: `src/TrainTracks/flow.py`; `scripts/check_regression.py flow`.
-- Next: 3.4c candidate graph/solve (+ archive preprocess_blob_det.py, optical_flow.py),
-  then config, GT.
+- 3.4a, 3.4b done + verified on sg100_Well5_1018 (blobs.csv identical; flow_raw bit-identical).
+  3.4c done in code (awaiting local check): `src/TrainTracks/tracking.py` (candidate graph,
+  solve, metrics, solution_to_track_df, run_tracking); `scripts/check_regression.py tracking`;
+  `preprocess_blob_det.py` and `optical_flow.py` archived.
+- Next: 3.5 config (`raw_root`/`results_root`, relative paths in metadata.json), GT expansion
+  (Phase 3 GT step), then Phase 3b migration.
 
 ## Phases (do in order; commit after each)
 

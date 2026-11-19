@@ -72,9 +72,11 @@ Items in a tier are roughly ordered; tiers are not.
       (3.1 done 2026-11-19: `ids.py` = track_uid/canonical-ID helpers, `tracks_io.py` =
       `geff_to_track_df`; callers updated; tests in `tests/`. Still to move: scorer,
       3.4a done + verified 2026-11-19: `detection.py` (identical blobs.csv on 1018);
-      3.4b done 2026-11-19: `flow.py` (compute_optical_flow, write_flow_zarr); check with
-      `scripts/check_regression.py detection|flow <movie_dir>`. Still to move:
-      `build_candidate_graph` and the solve step):
+      3.4b done + verified 2026-11-19: `flow.py` (flow_raw bit-identical on 1018);
+      3.4c done 2026-11-19: `tracking.py` (build_candidate_graph, edges, solve, metrics,
+      solution_to_track_df, run_tracking); check with `scripts/check_regression.py
+      detection|flow|tracking <movie_dir>`. `preprocess_blob_det.py` and `optical_flow.py`
+      archived. Remaining shared code is config/paths, not functions):
       `geff_to_track_df` (5 copies), `score_track`/`score_all` (2),
       `track_uid_for_group`/`canonical_track_id` (3), `build_candidate_graph`,
       `preprocess_stack`, `compute_optical_flow`, `track_df_to_nx`.

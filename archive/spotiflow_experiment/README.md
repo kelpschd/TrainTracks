@@ -13,8 +13,8 @@ Not moved here: two Spotiflow tracking runs are in
 plus their rows in ../legacy_single_movie/tracking_runs/tracking_log.csv.
 (Moved from the repo root during cleanup, 2026-11-19.)
 
-To re-run: these scripts import preprocess_blob_det (still in scripts/) and
-traccuracy_compare (now in archive/exploration_2026-09/scripts/), and their
+To re-run: these scripts import preprocess_blob_det and traccuracy_compare
+(both now in archive/exploration_2026-09/scripts/), and their
 hard-coded BASE / blobs / tracking_runs paths point at the old layout. Easiest is to
 check out tag pre-cleanup-2026-11-19, where everything is in its original place:
   PYTHONPATH=scripts python spotiflow_experiment/scripts/spotiflow_detect.py
