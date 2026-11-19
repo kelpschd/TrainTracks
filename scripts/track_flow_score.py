@@ -55,7 +55,7 @@ IMG_NUM = 9
 RUN_ID = "20260916_105301_9452"   # -72 / pen10
 
 # Manually validated ground-truth tracks (cols: frame, x, y, particle).
-GT_CSV = BASE / "sg100_Well5_1018_valid_tracks.csv"
+GT_CSV = BASE / "ground_truth" / "sg100_Well5_1018_valid_tracks.csv"
 
 # Source movie for GT intensity sampling (the movie GT_CSV was validated on).
 GT_MOVIE_ZARR = IMAGES_DIR / "sg100_Well5_1018.zarr"

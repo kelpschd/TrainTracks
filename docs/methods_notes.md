@@ -78,3 +78,16 @@ with `batch_cotracking.py` (the analysis itself is unchanged).
 | turn_incoherence | DONE (Phase 3.3): the scorer is the single definition, imported by the pipeline. `--gt` calibration to be re-run locally; no change to results expected. | Leave as is, document as a known limitation. |
 | Track IDs | DONE (Phase 3.2): sequential ID plus string `track_uid`, join on `track_uid` only. | Document only. |
 | metadata.json staleness | `--write-clean` updates `posthoc_results` and `output_clean_geff` (small fix). | Regenerate metadata in the Phase 5 re-run. |
+
+## Ground truth (expanded 2026-11-19)
+
+`ground_truth/` holds validated tracks for all 32 movies (294 tracks, 4040 detections), copied
+from the previous pipeline's manually validated output. Positives only and selected through
+the old pipeline's filters, so use it for recall and for checking that the cull does not remove
+known-good tracks; precision against it is not meaningful.
+
+The traccuracy summary stored with the batch (2026-09-30) used these files but the OLD
+`tracks_clean` (pipeline all-steps turn definition, before the 10-26 rebuild): node recall 0.78 /
+edge recall 0.64 for raw tracks and 0.48 / 0.43 for clean tracks, pooled over 32 movies
+(match threshold 15 px). Re-run `batch_traccuracy.py` before quoting GT recall for the final
+tracks.

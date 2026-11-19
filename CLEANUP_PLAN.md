@@ -67,8 +67,9 @@ Phase 0, 1, 2 done (2026-11-19). Phase 3 in progress:
 - 3.5a done in code (awaiting local check): `src/TrainTracks/config.py` (raw_root/results_root via CLI,
   env or `TrainTracks.toml`); results folder is named `results` (decided); batch_pipeline writes relative
   paths in metadata.json; consumers read relative or old absolute.
-- Next: GT expansion (copy the 32 `*_valid_tracks.csv`), `batch_root` defaults for the other batch
-  scripts, then Phase 3b migration.
+- 3.5a verified (38 tests pass). GT expansion done in code (awaiting local run): `ground_truth/` (32 movies),
+  `scripts/calibrate_cull_on_gt.py`, stale GT-root defaults fixed.
+- Next: `batch_root` defaults for the other batch scripts, then Phase 3b migration, then Phase 4/5.
 
 ## Phases (do in order; commit after each)
 

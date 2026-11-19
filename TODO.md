@@ -58,9 +58,17 @@ Items in a tier are roughly ordered; tiers are not.
       Only 8 of 157 GT links span > 2 frames, so most misses are detection
       drop-outs or the density filter, not gap closing. Check after Tier 1.
 
-- [ ] **Expand ground truth beyond 11 tracks / 1 movie** before relying on the
-      cull threshold. Even 2-3 more validated movies changes the calibration
-      from anecdote to estimate.
+- [x] **Expand ground truth beyond 11 tracks / 1 movie.** (Done 2026-11-19, cleanup Phase 3.)
+      `ground_truth/` now holds the validated tracks of all 32 movies (294 tracks, 4040
+      detections; old pipeline + manual validation, positives only; see its README).
+      `batch_traccuracy.py`, `batch_track_review.py` and `straightness_review.py` default
+      to it (their old default pointed at `tracking_results/`, since renamed).
+      `scripts/calibrate_cull_on_gt.py` checks the turn cutoff on every movie.
+- [ ] **Re-run `batch_traccuracy.py` on the CURRENT `tracks_clean.geff`.** The stored
+      `traccuracy/` results are from 2026-09-30, i.e. the old pipeline's clean tracks (before
+      the 10-26 rebuild with the calibrated scorer). They gave node recall 0.78 raw / 0.48
+      clean over the 32 movies (precision not meaningful, GT is positives only), which no
+      longer describes the final tracks.
 
 ## Tier 3 - reproducibility and structure
 

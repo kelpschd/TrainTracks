@@ -96,8 +96,7 @@ def resolve_paths(args) -> tuple[Path, Path, Path, Path]:
             meta = read_json(meta_path)
             input_zarr = meta.get("input_zarr", "")
             movie_id = Path(input_zarr).stem.replace(".zarr", "")
-            # try sibling of the run dir's grandparent (tracking_runs layout)
-            gt_path = run_dir.parent.parent / f"{movie_id}_valid_tracks.csv"
+            gt_path = Path(__file__).resolve().parents[1] / "ground_truth" / f"{movie_id}_valid_tracks.csv"
         else:
             gt_path = Path("__missing__")
 

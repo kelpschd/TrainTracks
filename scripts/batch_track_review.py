@@ -35,10 +35,7 @@ import zarr
 from TrainTracks.config import resolve_input_zarr
 from TrainTracks.tracks_io import geff_to_track_df
 
-DEFAULT_GT_ROOT = Path(
-    "/Users/kelpschdj/Documents/DataTecnica/TTU/Data/Sphere/"
-    "220725_i11w-hT-M33-I76_sg1035_d10sphere/tracking_results"
-)
+DEFAULT_GT_ROOT = Path(__file__).resolve().parents[1] / "ground_truth"   # <repo>/ground_truth
 
 
 def read_json(path: Path) -> dict:
