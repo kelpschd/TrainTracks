@@ -88,6 +88,21 @@ numbered CLI wrappers into `pipeline/` and replace hard-coded paths and `IMG_NUM
 with arguments or one config file. Write pure functions (DataFrame in/out) so the
 napari plugin can wrap them later.
 
+**Phase 3b - Results folder migration (after Phase 3 code is in place).**
+Add `config.yaml` (or `TrainTracks.toml`) with `raw_root` and `results_root`, read by
+every `pipeline/` step; replace the per-script `--output_dir` defaults and the
+hard-coded `/Users/...` paths. Make `metadata.json` store paths relative to
+`results_root` (today they are absolute and stale: they point to
+`DS/raw_data/tracking_batch/...`, which was later renamed). Then, with write access
+or by hand: create `DS/<results folder>/`, move the contents of
+`DS/tracking_batch_TrainTracks/` there (the existing per-movie layout can be kept as is),
+move the repo's `flow.zarr` to it, and move `analysis_20261026.qmd`/`Output_graphs` out
+of the batch folder (qmd to `analysis/` in the repo, figures to
+`<results folder>/figures/`). The qmd reads from its own folder with relative paths, so
+it needs a `results_root` parameter at the top. Confirm with a dry run on one movie
+before moving the rest, and leave the old batch folder in place until Phase 5's
+re-run reproduces the headline numbers.
+
 **Phase 4 - Reproducibility.**
 `environment.yml` plus a lock file with the versions listed in TODO.md, add a smoke
 test on a tiny synthetic movie, write the real README run order, and make the
@@ -114,3 +129,17 @@ confirm renames only; grep for the old script names and `/Users/dankelpsch/` pat
    Until then it stays in place (it is gitignored).
 3. Cleanup work happens on branch `cleanup/2026-11`; main keeps the pre-cleanup tag.
 4. turn_incoherence and track-ID fixes are done in Phase 3 (see docs/methods_notes.md).
+5. Data layout (decided 2026-11-19). Under the dataset root `DS`
+   (`.../Data/Sphere/220725_i11w-hT-M33-I76_sg1035_d10sphere`) there are two sibling
+   folders:
+   - `DS/raw_data/`: the `.nd2` files AND their `.zarr` conversions (written by
+     `import_export.py`, which already writes next to the `.nd2`). Nothing else.
+   - `DS/<results folder>/` (name to be chosen; new, clean): EVERY pipeline output,
+     both zarr and csv: per-movie blobs, flow.zarr, tracks / tracks_clean geff,
+     flow_scores, organelle and coloc tables, cotracking tables, per-movie
+     metadata.json, plus batch-level summaries, traccuracy outputs and figures.
+   The repo reads and writes only through two config values, `raw_root` and
+   `results_root`; no pipeline step may write into `raw_data/`, except the nd2->zarr
+   conversion. Claude currently has read-only access to `DS`, so creating the folder
+   and moving the existing `tracking_batch_TrainTracks` contents is a step you do (or
+   explicitly grant write access for); see Phase 3b.
