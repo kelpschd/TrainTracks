@@ -128,9 +128,11 @@ Items in a tier are roughly ordered; tiers are not.
       load 0.8 s, detection 23 s, flow 47 s, candidate graph 54 s, edges 0 s, solve 0.5 s, scoring 0.4 s;
       peak memory 7.9 GB. The candidate graph was the only stage that scaled with blob count (a
       full-frame mask per blob region). Fixed in code 2026-11-19 (reads the region's own pixels;
-      `tests/test_tracking_equivalence.py` compares with a copy of the old code, bit for bit) -- awaiting
-      local verification: pytest, `check_regression.py tracking` on 1018, a fresh 1026 dry run.
-      Next candidates: flow (47 s, ~60% of the remaining time) and peak memory.
+      `tests/test_tracking_equivalence.py` compares with a copy of the old code, bit for bit). VERIFIED
+      2026-11-19: 61 tests pass; `check_regression.py tracking` on 1018 identical; fresh 1026 run 83 s
+      (was 127 s), all outputs identical to the archive. The remaining graph time (about 10 s, my
+      estimate: dilating 33 full frames + labelling) is not worth chasing yet.
+      Next candidates: flow (47 s, ~57% of the remaining time), detection (23 s), peak memory (7.9 GB).
 - [ ] **Add one end-to-end smoke test** on a small synthetic movie with known
       tracks (detect -> flow -> solve -> score -> clean -> traccuracy).
       Would have caught every Tier 1 item.
