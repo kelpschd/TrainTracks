@@ -52,23 +52,23 @@ def add_track_uids(track_df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def canonical_track_id(group: pd.DataFrame) -> int:
-    """Deterministic 63-bit integer ID for a track (first 8 bytes of the SHA-1).
+def assign_sequential_track_ids(track_df: pd.DataFrame, start: int = 1) -> pd.DataFrame:
+    """Replace ``particle`` with sequential integers ``start..start+N-1``.
 
-    NOTE: 63-bit integers are not exactly representable as float64, so IDs that pass
-    through napari or pandas float columns can collide. Kept unchanged here so that
-    consolidating code does not change any output; replaced in the track-ID fix step.
+    Order is by ``track_uid`` (sorted), so the numbering is deterministic and does not
+    depend on the incoming IDs or row order. Sequential integers are exactly
+    representable as float64 (napari, pandas float columns), unlike the 63-bit hash
+    IDs this replaces. The integer is only meaningful within one output; use
+    ``track_uid`` to follow a track across files.
     """
-    digest = hashlib.sha1(repr(_payload(group)).encode("utf-8")).digest()
-    return int.from_bytes(digest[:8], "big") & ((1 << 63) - 1)
-
-
-def assign_canonical_track_ids(track_df: pd.DataFrame) -> pd.DataFrame:
-    """Replace ``particle`` with deterministic geometry-based integer IDs."""
-    df = track_df.copy().sort_values(["particle", "frame"]).reset_index(drop=True)
-    id_map = {
-        int(old): canonical_track_id(group)
-        for old, group in df.groupby("particle", sort=False)
+    df = track_df.copy()
+    uid_of = {
+        int(pid): track_uid_for_group(group)
+        for pid, group in df.groupby("particle", sort=False)
     }
-    df["particle"] = df["particle"].astype(int).map(id_map).astype("int64")
+    if len(set(uid_of.values())) != len(uid_of):
+        raise ValueError("two tracks have identical (frame, y, x) sequences")
+    new_id = {uid: i for i, uid in enumerate(sorted(uid_of.values()), start)}
+    mapping = {pid: new_id[uid] for pid, uid in uid_of.items()}
+    df["particle"] = df["particle"].astype(int).map(mapping).astype("int64")
     return df.sort_values(["particle", "frame"]).reset_index(drop=True)

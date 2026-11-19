@@ -4,8 +4,7 @@ import pandas as pd
 
 from TrainTracks.ids import (
     add_track_uids,
-    assign_canonical_track_ids,
-    canonical_track_id,
+    assign_sequential_track_ids,
     track_uid_for_group,
 )
 
@@ -60,11 +59,42 @@ def test_add_track_uids_does_not_mutate_and_one_uid_per_particle():
     assert out.track_uid.nunique() == 2
 
 
-def test_canonical_ids_fit_63_bits_and_are_deterministic():
+def test_sequential_ids_are_1_to_n_and_deterministic():
     df = _tracks()
-    a = assign_canonical_track_ids(df)
-    b = assign_canonical_track_ids(df.sample(frac=1, random_state=1))
-    assert (a.particle.to_numpy() == b.particle.to_numpy()).all()
+    a = assign_sequential_track_ids(df)
+    b = assign_sequential_track_ids(df.sample(frac=1, random_state=1))
     assert a.particle.dtype == np.int64
-    assert (a.particle >= 0).all() and (a.particle < 2**63).all()
-    assert canonical_track_id(df[df.particle == 3]) in set(a.particle)
+    assert sorted(a.particle.unique()) == [1, 2]
+    pd.testing.assert_frame_equal(a, b)
+
+
+def test_sequential_ids_follow_track_uid_not_input_ids():
+    df = _tracks()
+    renum = df.assign(particle=df.particle.map({7: 100, 3: 5}))
+    a = assign_sequential_track_ids(df)
+    b = assign_sequential_track_ids(renum)
+    ua = add_track_uids(a).drop_duplicates("particle").set_index("particle").track_uid
+    ub = add_track_uids(b).drop_duplicates("particle").set_index("particle").track_uid
+    assert ua.to_dict() == ub.to_dict()
+    # numbering is the rank of the uid
+    assert list(ua.sort_index()) == sorted(ua)
+
+
+def test_sequential_ids_exact_in_float64_and_custom_start():
+    out = assign_sequential_track_ids(_tracks(), start=0)
+    assert sorted(out.particle.unique()) == [0, 1]
+    big = pd.concat(
+        [_tracks().assign(particle=lambda d, k=k: d.particle + 10 * k, y=lambda d, k=k: d.y + k) for k in range(50)]
+    )
+    ids = assign_sequential_track_ids(big).particle.unique()
+    assert len(set(ids.astype(float))) == len(ids) == 100
+
+
+def test_sequential_ids_reject_duplicate_geometry():
+    df = _tracks()
+    dup = pd.concat([df, df.assign(particle=df.particle + 1000)])
+    try:
+        assign_sequential_track_ids(dup)
+    except ValueError:
+        return
+    raise AssertionError("expected ValueError")

@@ -46,23 +46,20 @@ cleaned tracks use the calibrated definition. What is still affected:
 
 So this is a reproducibility problem more than a problem with the current results.
 
-## Track-ID handling
+## Track-ID handling (fixed in cleanup Phase 3.2, 2026-11-19)
 
 funtracks renumbers `tracklet_id` / `particle` on every import, and 63-bit hashes
-collide in float64 (napari). Any join across tables must use the string `track_uid`.
-Known unsafe: `straightness_review.py:178` (silent empty join in the batch layout),
-and the `track_vis*` / `review_lyso_interaction.py` napari viewers.
-Cotracking checked 2026-11-19 (code read, not re-run): the headline numbers are NOT
-affected. `batch_cotracking.py` imports `tracks_clean.geff` once per movie via
-`geff_to_track_df`, writes `particle_tracks.csv` in that same run, and every downstream
-script (`summarize_cotracking_velocity.py`, `leading_trailing.py`,
-`length_matched_speed.py`) reads that CSV plus episodes written alongside it, so
-`particle` is only ever matched within one import. Remaining weakness: the loader keeps
-only `frame, x, y, particle` and drops `track_uid`, so cotracking results cannot be
-traced back to a specific track in `tracks_clean.geff` and `particle` IDs may differ
-between re-runs. Phase 3: carry `track_uid` through `particle_tracks.csv` and the
-episode tables, and make `batch_cotracking.py` import `geff_to_track_df` from
-`src/TrainTracks` instead of `batch_lyso_interaction`.
+collide in float64 (napari). The stable key is `track_uid`, a SHA-1 of the track's
+frame/position sequence (positions rounded to 1e-6 px); all joins across tables use it.
+Newly generated tracks get a sequential integer `particle` ranked by `track_uid`.
+
+Cotracking checked (code read, not re-run): the headline numbers were never affected.
+`batch_cotracking.py` imports `tracks_clean.geff` once per movie, writes
+`particle_tracks.csv` in that run, and every downstream script reads that CSV plus
+episodes written alongside it, so `particle` is only matched within one import.
+The tables now also carry `track_uid`, so results can be traced to a specific track in
+`tracks_clean.geff`. Tables written before 2026-11-19 lack this column; regenerate
+with `batch_cotracking.py` (the analysis itself is unchanged).
 
 ## Other facts to state or fix
 
@@ -81,5 +78,5 @@ episode tables, and make `batch_cotracking.py` import `geff_to_track_df` from
 | Item | Option A (recommended) | Option B |
 |---|---|---|
 | turn_incoherence | Make the scorer the single definition; the pipeline imports it. Re-run `--gt` calibration once in Phase 3, then regenerate `tracks_clean`. Document as a code fix, no change to results expected. | Leave as is, document as a known limitation. |
-| Track IDs | Fix in Phase 3 as part of moving shared uid helpers into `src/`: sequential ID plus string `track_uid`, join on `track_uid` only. | Document only. |
+| Track IDs | DONE (Phase 3.2): sequential ID plus string `track_uid`, join on `track_uid` only. | Document only. |
 | metadata.json staleness | `--write-clean` updates `posthoc_results` and `output_clean_geff` (small fix). | Regenerate metadata in the Phase 5 re-run. |

@@ -57,8 +57,8 @@ TrainTracks/
 Phase 0, 1, 2 done (2026-11-19). Phase 3 in progress:
 - 3.1 done: `src/TrainTracks/ids.py` and `tracks_io.py` replace 5 copies of
   `geff_to_track_df` and 3 of the uid helpers (behaviour-identical; see tests/).
-- 3.2 next: track-ID fix (sequential/31-bit IDs + `track_uid` joins), carry `track_uid`
-  through cotracking tables.
+- 3.2 done: sequential `particle` IDs, `track_uid` joins (straightness_review fixed),
+  `track_uid` carried through cotracking tables.
 - Then: scorer + turn_incoherence unification, remaining shared functions, config, GT.
 
 ## Phases (do in order; commit after each)

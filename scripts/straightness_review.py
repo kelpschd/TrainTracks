@@ -28,6 +28,7 @@ import napari
 import numpy as np
 import pandas as pd
 import zarr
+from TrainTracks.ids import add_track_uids
 from TrainTracks.tracks_io import geff_to_track_df
 
 DEFAULT_CUTOFFS = [0.4, 0.5, 0.6, 0.7]
@@ -160,10 +161,11 @@ def main():
     print(f"Tracks    : {track_df['particle'].nunique()} total")
 
     # --- Scores ---
+    # Join on track_uid ONLY: funtracks renumbers `particle` on every import, so the
+    # `particle` in flow_scores.csv does not match the one from this import.
     feats = pd.read_csv(scores_path)
-    feats["particle"] = feats["particle"].astype(int)
 
-    required = {"particle", "eligible", "path_straightness", "net_displacement", "turn_incoherence"}
+    required = {"track_uid", "eligible", "path_straightness", "net_displacement", "turn_incoherence"}
     missing = required - set(feats.columns)
     if missing:
         raise ValueError(
@@ -171,14 +173,14 @@ def main():
             "Re-run track_flow_score.py to regenerate."
         )
 
-    eligible_ids = set(feats.loc[feats["eligible"].astype(str) == "True", "particle"])
-    eligible_df = track_df[track_df["particle"].isin(eligible_ids)].copy()
+    eligible_uids = set(feats.loc[feats["eligible"].astype(str) == "True", "track_uid"])
+    eligible_df = track_df[track_df["track_uid"].isin(eligible_uids)].copy()
 
-    feat_lookup = feats.set_index("particle")[
+    feat_lookup = feats.set_index("track_uid")[
         ["path_straightness", "net_displacement", "turn_incoherence"]
     ]
     for col in ["path_straightness", "net_displacement", "turn_incoherence"]:
-        eligible_df[col] = eligible_df["particle"].map(feat_lookup[col])
+        eligible_df[col] = eligible_df["track_uid"].map(feat_lookup[col])
 
     n_eligible = eligible_df["particle"].nunique()
     n_ineligible = track_df["particle"].nunique() - n_eligible
@@ -190,7 +192,7 @@ def main():
         kept = feats[
             (feats["eligible"].astype(str) == "True") &
             (feats["path_straightness"] >= c)
-        ]["particle"].nunique()
+        ]["track_uid"].nunique()
         print(f"  path_straightness >= {c:.2f}: {kept:4d} / {n_eligible} ({kept/n_eligible*100:.1f}%)")
 
     # --- GT ---
@@ -202,15 +204,15 @@ def main():
         print(f"\nGT        : {gt_tracks['particle'].nunique()} validated tracks")
 
         # Report straightness of GT tracks if they can be matched by particle id
-        gt_pids = set(gt_tracks["particle"].astype(int))
-        matched = feats[feats["particle"].isin(gt_pids)]
+        gt_uids = set(add_track_uids(gt_tracks)["track_uid"])
+        matched = feats[feats["track_uid"].isin(gt_uids)]
         if not matched.empty:
-            print("GT track straightness (if particle IDs match scored tracks):")
+            print("GT track straightness (GT trajectories identical to a scored track):")
             for _, row in matched.iterrows():
-                print(f"  particle {int(row['particle'])}: straightness={row['path_straightness']:.3f} "
+                print(f"  track {row['track_uid'][:8]}: straightness={row['path_straightness']:.3f} "
                       f"net_disp={row['net_displacement']:.1f} turn={row['turn_incoherence']:.3f}")
         else:
-            print("(GT particle IDs don't match scored track IDs — spatial matching needed)")
+            print("(no GT trajectory is identical to a scored track — spatial matching needed)")
     else:
         print(f"\nGT CSV not found at {gt_path} — skipping (pass --gt to include)")
 
@@ -239,9 +241,9 @@ def main():
         kept_ids = feats.loc[
             (feats["eligible"].astype(str) == "True") &
             (feats["path_straightness"] >= cutoff),
-            "particle"
-        ].astype(int)
-        kept_df = eligible_df[eligible_df["particle"].isin(kept_ids)]
+            "track_uid"
+        ]
+        kept_df = eligible_df[eligible_df["track_uid"].isin(kept_ids)]
         viewer.add_tracks(
             tracks_array(kept_df),
             name=f"straightness >= {cutoff:.2f}  ({kept_df['particle'].nunique()} tracks)",
@@ -249,7 +251,7 @@ def main():
         )
 
     # Ineligible/short tracks for reference
-    ineligible_df = track_df[~track_df["particle"].isin(eligible_ids)]
+    ineligible_df = track_df[~track_df["track_uid"].isin(eligible_uids)]
     if not ineligible_df.empty:
         viewer.add_tracks(
             tracks_array(ineligible_df),

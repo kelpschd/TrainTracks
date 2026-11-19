@@ -53,7 +53,7 @@ import cotracking as ct  # noqa: E402
 def load_particle_tracks(movie_dir: Path) -> pd.DataFrame:
     from TrainTracks.tracks_io import geff_to_track_df
     df = geff_to_track_df(movie_dir / "tracks_clean.geff")
-    return df[["frame", "x", "y", "particle"]].copy()
+    return df[["frame", "x", "y", "particle", "track_uid"]].copy()
 
 
 def load_image(movie_dir: Path, raw_root: Path | None) -> np.ndarray:
@@ -85,6 +85,7 @@ def process_movie(movie_dir, raw_root, out_root, args, seed):
 
     P = load_particle_tracks(movie_dir)
     P.to_csv(out_dir / "particle_tracks.csv", index=False)
+    uid_of = dict(zip(P["particle"], P["track_uid"]))
     lys, mito = get_organelle_tracks(movie_dir, raw_root, out_dir, args.force_retrack)
 
     ep_kw = dict(contact_px=args.contact_px, min_contact_frames=args.min_contact_frames,
@@ -96,6 +97,10 @@ def process_movie(movie_dir, raw_root, out_root, args, seed):
     for name, O in (("lysosome", lys), ("mitochondria", mito)):
         ep = ct.find_episodes(P, O, **ep_kw) if len(O) else ct.find_episodes(P, O.reindex(columns=ct.REQUIRED), **ep_kw)
         steps = ct.particle_steps(P, ep)
+        # Carry the stable track_uid next to the import-local integer `particle`.
+        # Added AFTER the analysis so the analysis inputs are unchanged.
+        for tbl in (ep, steps):
+            tbl.insert(1, "track_uid", tbl["particle"].map(uid_of))
         ep.to_csv(out_dir / f"episodes_{name}.csv", index=False)
         steps.to_csv(out_dir / f"steps_{name}.csv", index=False)
         if args.n_perm > 0 and len(O):

@@ -154,8 +154,14 @@ def track_speed_table(data):
                              int((g.state != "never").any()),
                              during.speed.mean() if len(during) else np.nan, len(during),
                              outside.speed.mean() if len(outside) else np.nan, len(outside)))
-    return pd.DataFrame(rows, columns=["organelle", "movie", "particle", "n_steps", "mean_speed",
-                                       "cotracks", "speed_during", "n_during", "speed_outside", "n_outside"])
+    out = pd.DataFrame(rows, columns=["organelle", "movie", "particle", "n_steps", "mean_speed",
+                                      "cotracks", "speed_during", "n_during", "speed_outside", "n_outside"])
+    # stable track_uid next to the import-local particle (present if particle_tracks.csv has it)
+    uid_maps = {m: dict(zip(P["particle"], P["track_uid"]))
+                for m, P in data["P"].items() if "track_uid" in P.columns}
+    if uid_maps:
+        out.insert(3, "track_uid", [uid_maps.get(m, {}).get(p) for m, p in zip(out["movie"], out["particle"])])
+    return out
 
 
 def cotracking_vs_never(ts):

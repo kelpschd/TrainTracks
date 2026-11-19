@@ -24,15 +24,17 @@ Items in a tier are roughly ordered; tiers are not.
       Files: `scripts/batch_pipeline.py:777`,
       `scripts/track_flow_score.py:316`.
 
-- [ ] **Fix track-ID handling.**
-      funtracks renumbers `tracklet_id` on import, and 63-bit hashes collide in
-      float64 (napari). Use a <= 31-bit hash or sequential IDs plus a separate
-      `track_uid` string column. Then:
-      - `straightness_review.py:178` joins by int particle (currently an
-        empty join in the batch layout, silent).
-      - `track_vis.py`, `track_vis_FrameSweep.py`, `track_vis_thresholds.py`,
-        `review_lyso_interaction.py` pass IDs through float64 into napari.
-      - Keep `batch_track_review.py`'s uid-join pattern as the model.
+- [x] **Fix track-ID handling.** (Done 2026-11-19, cleanup Phase 3.2.)
+      `particle` is now sequential 1..N (ranked by `track_uid`) in newly generated
+      tracks (`batch_pipeline.solution_to_track_df`); `track_uid` is the only key for
+      joins. `straightness_review.py` now joins flow_scores.csv on `track_uid`
+      (it used to join on the import-local int `particle`, which silently matched
+      nothing). Cotracking tables (`particle_tracks.csv`, `episodes_*.csv`,
+      `steps_*.csv`, `track_speed.csv`) carry `track_uid` next to `particle`.
+      The 63-bit hash IDs (`canonical_track_id`) are removed. The track_vis* viewers
+      that passed IDs through float64 are archived.
+      Existing batch outputs keep their old IDs until the Phase 5 re-run; their
+      `track_uid` is unchanged, so nothing downstream breaks.
 
 ## Tier 2 - method quality (affects accuracy, not correctness)
 

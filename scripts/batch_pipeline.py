@@ -62,7 +62,7 @@ import pandas as pd
 import scipy.spatial
 import skimage.measure
 import zarr
-from TrainTracks.ids import assign_canonical_track_ids
+from TrainTracks.ids import assign_sequential_track_ids
 from dask import compute, delayed
 from dask.diagnostics import ProgressBar
 from scipy import ndimage as ndi
@@ -681,7 +681,7 @@ def solution_to_track_df(solution_nx: nx.DiGraph) -> pd.DataFrame:
                 "y": float(d["y"]),
                 "x": float(d["x"]),
             })
-    return assign_canonical_track_ids(
+    return assign_sequential_track_ids(
         pd.DataFrame(rows).sort_values(["particle", "frame"]).reset_index(drop=True)
     )
 
