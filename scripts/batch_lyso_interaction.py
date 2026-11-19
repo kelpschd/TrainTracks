@@ -30,6 +30,7 @@ ND2 axesCalibration factor if you need physical units.
 Usage:
     python batch_lyso_interaction.py /path/to/raw_data/tracking_batch
     python batch_lyso_interaction.py /path/to/tracking_batch --movie sg100_Well1_1003
+    python batch_lyso_interaction.py /path/to/tracking_batch --skip-existing   # resume an interrupted batch
     python batch_lyso_interaction.py /path/to/tracking_batch --raw-root /path/to/raw_data
     python batch_lyso_interaction.py /path/to/tracking_batch --strict
 """
@@ -416,6 +417,11 @@ def main():
     parser.add_argument("--out-subdir", default="organelle",
                         help="Per-movie output subdir name (default: organelle)")
     parser.add_argument("--strict", action="store_true", help="Stop on first error")
+    parser.add_argument(
+        "--skip-existing", action="store_true",
+        help="Resume: reuse the per-movie outputs of movies that are already complete "
+             "(all three files written) instead of re-segmenting them",
+    )
     args = parser.parse_args()
 
     batch_root = args.batch_root.expanduser().resolve()
@@ -448,6 +454,14 @@ def main():
         print("=" * 72)
         print(f"MOVIE: {movie_dir.name}")
         print("=" * 72)
+        out_dir = movie_dir / args.out_subdir
+        # mask_area_log.csv is written last by process_movie, so all three files present = complete
+        done = [out_dir / f for f in ("detections_organelle.csv", "tracks_organelle.csv", "mask_area_log.csv")]
+        if args.skip_existing and all(f.exists() for f in done):
+            all_det.append(pd.read_csv(done[0]))
+            all_tracks.append(pd.read_csv(done[1]))
+            print("  already complete: reusing existing per-movie outputs")
+            continue
         try:
             res = process_movie(movie_dir, raw_root, args.out_subdir)
             all_det.append(res.pop("_det_df"))
