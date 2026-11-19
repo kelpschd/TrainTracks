@@ -15,8 +15,8 @@ This reproduces the TRACKING configuration from run 20260916_105301_9452:
     max_children           = 1
 
 Detection is set to threshold 0.00017 because the reference run consumed
-blobs_0_00017.csv. The remaining detection settings are those currently in
-preprocess_blob_det.py.
+blobs_0_00017.csv. The remaining detection settings are in DETECTION_PARAMS below
+(the detection, flow and tracking steps live in src/TrainTracks/).
 
 Usage:
     python batch_pipeline.py /path/to/folder_of_zarr_movies

@@ -64,7 +64,8 @@ ZARR_ARRAY_KEY = "s0"
 # Per-run outputs don't store pixel data, so intensity is sampled from the source
 # .zarr. Two sources: raw detection channel, and `pre` = background-subtracted
 # reconstruction matching detection (median-filtered mean projection subtracted).
-# These MUST match preprocess_blob_det.py for `pre` to mean anything.
+# These MUST match the detection preprocessing (TrainTracks.detection.preprocess_stack)
+# for `pre` to mean anything.
 INTENSITY_BLOB_CHANNEL = 0
 INTENSITY_MEDIAN_FILTER_SIZE = 10
 INTENSITY_DISK_RADIUS_PX = 2        # mean over a fixed r=2 disk (13 px)
