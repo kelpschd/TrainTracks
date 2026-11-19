@@ -11,10 +11,12 @@ results_root = "/Users/you/Documents/DataTecnica/TTU/Data/Sphere/220725_i11w-hT-
 # without it the pipeline sizes itself from the machine (performance cores and RAM). Pick a
 # profile with `--profile NAME`; `--jobs` / `--threads-per-job` override both.
 [resources]
-mem_per_job_gb = 8        # safety estimate that caps automatic --jobs; each run records the real peak
+# mem_per_job_gb = 4      # optional: pin a fixed memory estimate; by default it is modelled from the
+#                         # threads per job (about 1.6 + 0.9 x threads GB, measured). Each run records
+#                         # the real peak (peak_rss_gb) in metadata.json to check it.
 
 [profiles.laptop]         # e.g. 12-core Mac (8 performance + 4 efficiency), 32 GB
-jobs = 3
+jobs = 4
 threads_per_job = 2
 
 [profiles.hpc_array]      # one movie per SLURM array task (sbatch --array=0-31 --cpus-per-task=8)

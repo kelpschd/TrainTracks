@@ -8,24 +8,29 @@ described, not hard-coded. Each field is resolved in this order (first one that 
    array task runs one movie at a time),
 3. a named profile in ``TrainTracks.toml`` (``--profile NAME`` -> ``[profiles.NAME]``),
 4. the ``[resources]`` table of ``TrainTracks.toml``,
-5. automatic: ``jobs = min(performance cores // 2, 0.75 * RAM // mem_per_job_gb)``,
-   ``threads_per_job = performance cores // jobs``.
+5. automatic: the largest ``jobs <= performance cores // 2`` whose total estimated memory fits in
+   75% of RAM, with ``threads_per_job = performance cores // jobs``.
+
+Memory per job depends on its threads, because detection holds one frame's blob-search arrays per
+thread. Measured on 33-frame 2048x2048x4 movies (2026-11-19): peak 3.3-3.5 GB at 2 threads, 8.8-9.5 GB
+at 8 threads, i.e. about ``1.6 + 0.9 * threads`` GB. That model is used unless ``mem_per_job_gb`` is
+set (flag, profile or ``[resources]``), which pins a fixed estimate instead.
 
 Example ``TrainTracks.toml``::
 
     [resources]
-    mem_per_job_gb = 8
+    mem_per_job_gb = 4        # optional: pin a fixed estimate instead of the threads-based model
 
     [profiles.laptop]
-    jobs = 3
+    jobs = 4
     threads_per_job = 2
 
     [profiles.hpc_array]      # one movie per SLURM array task
     jobs = 1
     threads_per_job = 8
 
-``mem_per_job_gb`` is a safety estimate used only to cap automatic ``jobs``; each run records the
-real peak memory of every movie in its metadata so the estimate can be tightened.
+Each run records the real peak memory (``peak_rss_gb``) and stage timings of every movie in its
+metadata, so the model can be checked against new data or new hardware.
 
 Light imports only (no numpy), so worker processes can import this before any numeric library.
 """
@@ -37,9 +42,10 @@ import subprocess
 import sys
 from dataclasses import dataclass
 
-DEFAULT_MEM_PER_JOB_GB = 8.0
 MIN_THREADS_PER_JOB = 2
 RAM_FRACTION = 0.75
+MEM_BASE_GB = 1.6          # peak memory model, measured 2026-11-19 (see module docstring)
+MEM_PER_THREAD_GB = 0.9
 
 
 @dataclass(frozen=True)
@@ -53,7 +59,7 @@ class Hardware:
 class Resources:
     jobs: int
     threads_per_job: int
-    mem_per_job_gb: float
+    mem_per_job_gb: float      # estimate used for sizing (modelled from threads unless pinned)
 
 
 def _macos_performance_cores() -> int | None:
@@ -112,10 +118,23 @@ def _parse_jobs(value) -> int | None:
     return n
 
 
-def auto_jobs(hw: Hardware, mem_per_job_gb: float, min_threads: int = MIN_THREADS_PER_JOB) -> int:
+def estimated_mem_gb(threads: int) -> float:
+    """Modelled peak memory of one movie running with ``threads`` threads."""
+    return MEM_BASE_GB + MEM_PER_THREAD_GB * threads
+
+
+def auto_jobs(hw: Hardware, mem_per_job_gb: float | None = None, min_threads: int = MIN_THREADS_PER_JOB) -> int:
+    """Largest number of parallel movies that fits the cores and 75% of RAM.
+
+    ``mem_per_job_gb=None`` uses the threads-based model; a number pins a fixed estimate.
+    """
     by_cpu = max(1, hw.performance_cores // min_threads)
-    by_mem = max(1, int(RAM_FRACTION * hw.memory_gb // mem_per_job_gb))
-    return min(by_cpu, by_mem)
+    for jobs in range(by_cpu, 0, -1):
+        threads = max(1, hw.performance_cores // jobs)
+        mem = mem_per_job_gb if mem_per_job_gb is not None else estimated_mem_gb(threads)
+        if jobs * mem <= RAM_FRACTION * hw.memory_gb:
+            return jobs
+    return 1
 
 
 def resolve_resources(
@@ -142,7 +161,8 @@ def resolve_resources(
             raise KeyError(f"profile {profile!r} not found in config (have: {sorted(profiles)})")
         table.update(profiles[profile])
 
-    mem = float(mem_per_job_gb if mem_per_job_gb is not None else table.get("mem_per_job_gb", DEFAULT_MEM_PER_JOB_GB))
+    pinned = mem_per_job_gb if mem_per_job_gb is not None else table.get("mem_per_job_gb")
+    pinned = float(pinned) if pinned is not None else None
 
     n_jobs = _parse_jobs(jobs)
     if n_jobs is None and env.get("SLURM_ARRAY_TASK_ID") is not None and "jobs" not in table:
@@ -150,7 +170,7 @@ def resolve_resources(
     if n_jobs is None:
         n_jobs = _parse_jobs(table.get("jobs"))
     if n_jobs is None:
-        n_jobs = auto_jobs(hw, mem)
+        n_jobs = auto_jobs(hw, pinned)
 
     threads = threads_per_job
     if threads is None and env.get("SLURM_CPUS_PER_TASK"):
@@ -159,7 +179,8 @@ def resolve_resources(
         threads = int(table["threads_per_job"])
     if threads is None:
         threads = max(1, hw.performance_cores // n_jobs)
-    return Resources(jobs=n_jobs, threads_per_job=int(threads), mem_per_job_gb=mem)
+    mem = pinned if pinned is not None else estimated_mem_gb(int(threads))
+    return Resources(jobs=n_jobs, threads_per_job=int(threads), mem_per_job_gb=round(mem, 2))
 
 
 def apply_thread_limits(threads: int) -> None:

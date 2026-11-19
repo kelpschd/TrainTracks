@@ -1,5 +1,5 @@
 """Tests for TrainTracks.resources (resolution order, auto sizing, SLURM environment)."""
-from TrainTracks.resources import Hardware, auto_jobs, resolve_resources
+from TrainTracks.resources import Hardware, auto_jobs, estimated_mem_gb, resolve_resources
 
 HW = Hardware(logical_cores=12, performance_cores=8, memory_gb=32.0)  # the 12-core / 32 GB Mac
 
@@ -11,16 +11,25 @@ def _res(**kw):
     return resolve_resources(**kw)
 
 
-def test_auto_is_limited_by_memory_then_cores():
+def test_pinned_memory_limits_jobs_then_cores():
     assert auto_jobs(HW, mem_per_job_gb=8.0) == 3  # 0.75 * 32 // 8
     assert auto_jobs(HW, mem_per_job_gb=4.0) == 4  # memory allows 6, performance cores // 2 = 4
     assert auto_jobs(Hardware(4, 2, 4.0), mem_per_job_gb=8.0) == 1  # never below 1
 
 
+def test_threads_based_memory_model_matches_the_measurements():
+    # measured 2026-11-19: 3.3-3.5 GB at 2 threads, 8.8-9.5 GB at 8 threads
+    assert 3.2 <= estimated_mem_gb(2) <= 3.6 and 8.5 <= estimated_mem_gb(8) <= 9.5
+    assert auto_jobs(HW) == 4                                    # 12-core / 32 GB Mac: 4 jobs x 2 threads
+    assert auto_jobs(Hardware(8, 8, 16.0)) == 3                  # 16 GB: 3 jobs (3 x 2 threads' 3.4 GB fits 12 GB)
+    assert auto_jobs(Hardware(64, 64, 256.0)) == 32              # a big node: limited by cores // 2
+
+
 def test_auto_threads_use_the_performance_cores():
     r = _res()
-    assert (r.jobs, r.threads_per_job) == (3, 2)
+    assert (r.jobs, r.threads_per_job) == (4, 2) and 3.2 <= r.mem_per_job_gb <= 3.6
     assert _res(jobs=1).threads_per_job == 8
+    assert _res(mem_per_job_gb=8).jobs == 3
 
 
 def test_cli_beats_profile_beats_resources_table():

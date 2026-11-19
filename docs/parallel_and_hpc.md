@@ -14,10 +14,23 @@ python scripts/batch_pipeline.py --movie sg100_Well5_1018 --output-dir /tmp/scra
 python scripts/batch_pipeline.py --skip-existing       # resume: skip movies that are already complete
 ```
 
-Automatic sizing: `jobs = min(performance cores // 2, 0.75 * RAM // mem_per_job_gb)` and
-`threads_per_job = performance cores // jobs` (Apple Silicon efficiency cores are not counted).
-`mem_per_job_gb` is only a cap (default 8). Every movie's `metadata.json` records
-`peak_rss_gb` and `timings_seconds`, so tighten the estimate from real numbers.
+Automatic sizing: the largest `jobs <= performance cores // 2` whose estimated memory fits in 75% of
+RAM, and `threads_per_job = performance cores // jobs` (Apple Silicon efficiency cores are not counted).
+Memory per job is modelled from its threads, `about 1.6 + 0.9 * threads` GB, because detection holds one
+frame's blob-search arrays per thread. Set `mem_per_job_gb` (flag, profile or `[resources]`) to pin a fixed
+value instead. Every movie's `metadata.json` records `peak_rss_gb` and `timings_seconds`, so the model can be
+checked against new data or hardware.
+
+Measured on a 12-core Mac (8 performance + 4 efficiency, 32 GB), 33-frame 2048 x 2048 x 4 movies:
+
+| | 1 job x 8 threads | 3 jobs x 2 threads |
+|---|---|---|
+| peak memory per movie | 8.8 to 9.5 GB | 3.3 to 3.5 GB |
+| detection / flow / graph | 21 s / 47 s / 10 s | 61 s / 49 s / 10 s |
+| 3 small movies, wall clock | 4 min 02 s | 2 min 09 s |
+
+Detection is the only stage that uses threads; flow and the graph are single-threaded. So several movies at
+once beats more threads per movie, and memory (not cores) was what limited `--jobs`.
 
 With `--jobs > 1` each movie runs in a fresh process, its output goes to `<output>/logs/<movie>.log`,
 and one progress line per finished movie is printed. A failed movie does not stop the others.
