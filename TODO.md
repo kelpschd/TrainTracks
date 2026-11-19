@@ -73,8 +73,9 @@ Items in a tier are roughly ordered; tiers are not.
       `geff_to_track_df`; callers updated; tests in `tests/`. Still to move: scorer,
       3.4a done + verified 2026-11-19: `detection.py` (identical blobs.csv on 1018);
       3.4b done + verified 2026-11-19: `flow.py` (flow_raw bit-identical on 1018);
-      3.4c done 2026-11-19: `tracking.py` (build_candidate_graph, edges, solve, metrics,
-      solution_to_track_df, run_tracking); check with `scripts/check_regression.py
+      3.4c done + verified 2026-11-19: `tracking.py` (build_candidate_graph, edges, solve,
+      metrics, solution_to_track_df, run_tracking; re-solve on 1018 gives the identical
+      3205 tracks); check with `scripts/check_regression.py
       detection|flow|tracking <movie_dir>`. `preprocess_blob_det.py` and `optical_flow.py`
       archived. Remaining shared code is config/paths, not functions):
       `geff_to_track_df` (5 copies), `score_track`/`score_all` (2),
@@ -121,6 +122,10 @@ Items in a tier are roughly ordered; tiers are not.
 
 ## Tier 4 - cleanup
 
+- [ ] `tracking.build_candidate_graph` calls `skimage.morphology.binary_dilation`, deprecated in
+      scikit-image 0.26 and removed in 0.28 (FutureWarning seen 2026-11-19). `disk` is
+      symmetric, so `skimage.morphology.dilation` should be equivalent; swap it and confirm
+      with `check_regression.py tracking`. Until then keep scikit-image < 0.28 in the pin.
 - [ ] `compute_optical_flow` hard-codes channel 0; use `blob_channel`.
 - [ ] Legacy `flow.zarr/flow_raw` is (T, ...) with a zero last frame; new
       pipeline writes (T-1, ...). Regenerate the legacy one or note it.
