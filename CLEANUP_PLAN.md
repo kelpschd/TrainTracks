@@ -49,7 +49,7 @@ TrainTracks/
     exploration_2026-09/ track_vis*, sweep_*, traccuracy_compare, flow_vis, vs_gt_matplotlib ...
     spotiflow_experiment/  (already self-contained; just move)
     legacy_single_movie/ blobs/, test_run_7.geff, root traccuracy CSVs, tracking_runs/
-  (flow.zarr: not archived; deleted in Phase 3 after `--gt` calibration is repointed)
+  (flow.zarr: goes to <results root>/sg100_Well5_1018/archived_flow/, outside the repo)
   TODO.md                tracked (remove from .gitignore)
 ```
 
@@ -76,7 +76,7 @@ Move the exploration scripts, legacy `blobs/`, `test_run_7.geff`, root
 one-paragraph README each (what question it answered, date, how to re-run), following
 the style of `spotiflow_experiment/README.md`. Keep the two Spotiflow runs note from
 that README in sync when `tracking_runs/` moves. `flow.zarr` is left in place for now
-(`--gt` calibration still reads it) and is deleted in Phase 3 once repointed (see Decision 2).
+(`--gt` calibration still reads it) and moves to `archived_flow/` (see Decision 2).
 
 **Phase 3 - Consolidate shared code into `src/TrainTracks/`.**
 Extract in this order, running the existing batch on one movie after each step and
@@ -96,7 +96,7 @@ hard-coded `/Users/...` paths. Make `metadata.json` store paths relative to
 `DS/raw_data/tracking_batch/...`, which was later renamed). Then, with write access
 or by hand: create `DS/<results folder>/`, move the contents of
 `DS/tracking_batch_TrainTracks/` there (the existing per-movie layout can be kept as is),
-delete the repo's `flow.zarr` (not move: batch flow already exists per movie), and move `analysis_20261026.qmd`/`Output_graphs` out
+move the repo's `flow.zarr` into `sg100_Well5_1018/archived_flow/` (if not already done), and move `analysis_20261026.qmd`/`Output_graphs` out
 of the batch folder (qmd to `analysis/` in the repo, figures to
 `<results folder>/figures/`). The qmd reads from its own folder with relative paths, so
 it needs a `results_root` parameter at the top. Confirm with a dry run on one movie
@@ -124,14 +124,15 @@ confirm renames only; grep for the old script names and `/Users/dankelpsch/` pat
 1. Batch outputs (`tracking_batch_TrainTracks`) and `analysis_20261026.qmd` live
    outside this repo, next to the raw data. They stay there; the repo gets a config
    entry (`data_root` / `results_root`) instead of hard-coded paths.
-2. `flow.zarr` in the repo is not needed long term (batch outputs have their own
-   per-movie flow). Not a byte-identical copy though: it is the legacy (33, Y, X, 2)
-   array with a zero last frame plus `flow_frames_XY` visualisation frames, whereas the
-   batch writes (32, Y, X, 2). Only legacy scripts read it (`track_flow_score.py`
-   including its `--gt` calibration, `candidate_graph.py`, `flow_vis.py`, `track_vis*`).
-   Plan: repoint `--gt` calibration at the results-root flow for sg100_Well5_1018 in
-   Phase 3, then delete the repo copy (regenerable with the optical-flow step).
-   It is gitignored, so there is no git backup.
+2. The repo's `flow.zarr` is one of the earliest flow runs for sg100_Well5_1018, kept
+   as an archive, not deleted. It is the legacy (33, Y, X, 2) array (one frame per
+   image frame, last frame zero) plus `flow_frames_XY` visualisation frames. The batch
+   pipeline writes (T-1, Y, X, 2), one flow field per frame transition, for whatever
+   T the movie has (33 frames gives 32). Destination:
+   `<results root>/sg100_Well5_1018/archived_flow/flow.zarr`. Until it moves, the legacy
+   scripts that read it (`track_flow_score.py` incl. `--gt`, `candidate_graph.py`,
+   `flow_vis.py`, `track_vis*`) keep working; in Phase 3 `--gt` calibration is repointed
+   at the batch flow. It is gitignored, so git has no copy.
 3. Cleanup work happens on branch `cleanup/2026-11`; main keeps the pre-cleanup tag.
 4. turn_incoherence and track-ID fixes are done in Phase 3 (see docs/methods_notes.md).
 5. Data layout (decided 2026-11-19). Under the dataset root `DS`
