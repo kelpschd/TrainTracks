@@ -8,9 +8,10 @@ written; the stored outputs are only read.
 
 Usage:
     python scripts/check_regression.py detection <movie_dir> [--raw-root <raw_data>]
+    python scripts/check_regression.py flow      <movie_dir> [--raw-root <raw_data>]
 
     <movie_dir>   e.g. .../tracking_batch_TrainTracks/sg100_Well5_1018
-                  (needs metadata.json and blobs.csv)
+                  (needs metadata.json; blobs.csv for 'detection', flow.zarr for 'flow')
     --raw-root    folder with <movie>.zarr (default: <movie_dir>/../../raw_data)
 
 Exit code 0 = identical, 1 = differences.
@@ -27,23 +28,54 @@ import numpy as np
 import pandas as pd
 
 
-def check_detection(movie_dir: Path, raw_root: Path) -> bool:
+def _load_movie(movie_dir: Path, raw_root: Path):
+    """Return (metadata, (T,C,Y,X) image) for a movie dir."""
     import zarr
 
-    from TrainTracks.detection import run_detection
-
     meta = json.loads((movie_dir / "metadata.json").read_text())
-    params = meta["detection_params"]
     key = meta.get("zarr_array_key", "s0")
     zarr_path = raw_root / f"{movie_dir.name}.zarr"   # metadata's input_zarr path may be stale
     if not zarr_path.exists():
         raise FileNotFoundError(f"{zarr_path} not found (pass --raw-root)")
-
     print(f"movie      : {movie_dir.name}")
     print(f"zarr       : {zarr_path} [{key}]")
-    print(f"params     : {params}")
     img = np.asarray(zarr.open_group(str(zarr_path), mode="r")[key])
     print(f"image shape: {img.shape}")
+    return meta, img
+
+
+def check_flow(movie_dir: Path, raw_root: Path) -> bool:
+    import zarr
+
+    from TrainTracks.flow import compute_optical_flow
+
+    meta, img = _load_movie(movie_dir, raw_root)
+    params = meta["flow_params"]
+    print(f"params     : {params}")
+    new = compute_optical_flow(img, params)
+    stored = np.asarray(zarr.open_group(str(movie_dir / "flow.zarr"), mode="r")["flow_raw"])
+    print(f"flow shape : new {new.shape} | stored {stored.shape}")
+    if new.shape != stored.shape:
+        return False
+    diff = np.abs(new.astype(np.float64) - stored.astype(np.float64))
+    n_diff = int((diff > 0).sum())
+    print(f"max |diff| : {diff.max():.3e} | mean |diff| {diff.mean():.3e} | differing values {n_diff} of {diff.size}")
+    if n_diff == 0:
+        print("flow_raw   : IDENTICAL (bit for bit)")
+        return True
+    if diff.max() <= 1e-4:
+        print("flow_raw   : numerically equal (max diff <= 1e-4; float rounding only)")
+        return True
+    print("flow_raw   : DIFFERENT")
+    return False
+
+
+def check_detection(movie_dir: Path, raw_root: Path) -> bool:
+    from TrainTracks.detection import run_detection
+
+    meta, img = _load_movie(movie_dir, raw_root)
+    params = meta["detection_params"]
+    print(f"params     : {params}")
 
     raw_blobs, blobs = run_detection(img, params)
     stored = pd.read_csv(movie_dir / "blobs.csv")
@@ -73,7 +105,7 @@ def check_detection(movie_dir: Path, raw_root: Path) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("stage", choices=["detection"])
+    parser.add_argument("stage", choices=["detection", "flow"])
     parser.add_argument("movie_dir", type=Path)
     parser.add_argument("--raw-root", type=Path, default=None)
     args = parser.parse_args()
@@ -81,7 +113,7 @@ def main() -> int:
     movie_dir = args.movie_dir.expanduser().resolve()
     raw_root = (args.raw_root.expanduser().resolve() if args.raw_root
                 else movie_dir.parent.parent / "raw_data")
-    ok = {"detection": check_detection}[args.stage](movie_dir, raw_root)
+    ok = {"detection": check_detection, "flow": check_flow}[args.stage](movie_dir, raw_root)
     print("\nRESULT:", "PASS (identical to stored output)" if ok else "FAIL")
     return 0 if ok else 1
 
