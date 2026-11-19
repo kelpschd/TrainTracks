@@ -44,8 +44,10 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import shutil
 import sys
+import time
 import traceback
 import uuid
 from datetime import datetime
@@ -58,6 +60,8 @@ import zarr
 from TrainTracks.config import load_paths, to_relative
 from TrainTracks.detection import run_detection
 from TrainTracks.flow import compute_optical_flow, write_flow_zarr
+from TrainTracks.parallel import run_jobs, shard, shard_from_env
+from TrainTracks.resources import resolve_resources
 from TrainTracks.tracking import (
     annotate_solution_track_ids, run_tracking, solution_to_track_df, track_metrics,
 )
@@ -197,17 +201,62 @@ def resolve_movie_dirs(input_dir: Path) -> list[Path]:
 # ============================================================================
 
 
-def process_movie(movie_path: Path, output_root: Path, overwrite: bool) -> dict:
-    movie_id = movie_path.name[:-5] if movie_path.name.endswith(".zarr") else movie_path.stem
-    run_id = make_run_id()
-    movie_out = output_root / movie_id
+class _Stopwatch:
+    """Seconds spent in each stage of one movie (recorded in metadata.json)."""
 
-    if movie_out.exists():
-        if not overwrite:
+    def __init__(self) -> None:
+        self.t = time.perf_counter()
+        self.laps: dict[str, float] = {}
+
+    def lap(self, name: str) -> None:
+        now = time.perf_counter()
+        self.laps[name] = round(now - self.t, 2)
+        self.t = now
+
+
+def _peak_rss_gb() -> float | None:
+    """Peak resident memory of this process (GB). In a pool, each movie runs in a fresh process."""
+    try:
+        import resource
+    except ImportError:  # not available on Windows
+        return None
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return round(peak / 1024**3 if sys.platform == "darwin" else peak / 1024**2, 2)  # bytes on macOS, KB on Linux
+
+
+def movie_id_of(movie_path: Path) -> str:
+    return movie_path.name[:-5] if movie_path.name.endswith(".zarr") else movie_path.stem
+
+
+def process_movie(
+    movie_path: Path, output_root: Path, overwrite: bool, skip_existing: bool = False
+) -> dict:
+    """Run the full pipeline on one movie.
+
+    Everything is written to ``<movie>.partial`` and renamed to ``<movie>`` only when the movie is
+    complete, so an interrupted job (crash, killed cluster task) never leaves a half-written movie
+    folder, and with ``overwrite`` the old output survives until the new one is finished.
+    ``skip_existing`` returns the stored metadata of an already complete movie.
+    """
+    movie_id = movie_id_of(movie_path)
+    run_id = make_run_id()
+    final_out = output_root / movie_id
+    movie_out = output_root / f"{movie_id}.partial"
+    sw = _Stopwatch()
+    t_start = time.perf_counter()
+
+    if final_out.exists():
+        complete = (final_out / "metadata.json").exists()
+        if skip_existing and complete:
+            print(f"Skipping {movie_id}: complete output already exists")
+            return json.loads((final_out / "metadata.json").read_text())
+        if not (overwrite or (skip_existing and not complete)):
             raise FileExistsError(
-                f"Output already exists: {movie_out}. Use --overwrite to replace it."
+                f"Output already exists: {final_out}. Use --overwrite to replace it "
+                "(or --skip-existing to resume)."
             )
-        shutil.rmtree(movie_out)
+    if movie_out.exists():
+        shutil.rmtree(movie_out)  # leftover from an interrupted run
     movie_out.mkdir(parents=True, exist_ok=True)
 
     blobs_csv = movie_out / "blobs.csv"
@@ -232,18 +281,21 @@ def process_movie(movie_path: Path, output_root: Path, overwrite: bool) -> dict:
 
     T, C, Y, X = img_stack.shape
     print(f"Image shape: {img_stack.shape}, dtype={img_stack.dtype}")
+    sw.lap("load_s")
 
     # Detection
     print(f"Detecting blobs (threshold={DETECTION_PARAMS['threshold']})...")
     raw_blobs, blobs_df = run_detection(img_stack, DETECTION_PARAMS)
     blobs_df.to_csv(blobs_csv, index=False)
     print(f"Blobs: {len(raw_blobs)} raw -> {len(blobs_df)} after density filter")
+    sw.lap("detection_s")
 
     # Flow
     print("Computing optical flow...")
     flow_raw = compute_optical_flow(img_stack, FLOW_PARAMS)
     write_flow_zarr(flow_raw, flow_zarr)
     print(f"Flow shape: {flow_raw.shape} (explicitly T-1 transitions)")
+    sw.lap("flow_s")
 
     # Candidate graph and solve
     solution_nx, cand_stats = run_tracking(blobs_df, flow_raw, T, TRACKING_PARAMS)
@@ -251,6 +303,7 @@ def process_movie(movie_path: Path, output_root: Path, overwrite: bool) -> dict:
         f"Candidate graph: {cand_stats['n_candidate_nodes']} nodes, "
         f"{cand_stats['n_candidate_edges']} edges"
     )
+    sw.lap("tracking_s")
     metrics = track_metrics(solution_nx, LONG_TRACK_MIN_FRAMES)
 
     print(
@@ -268,6 +321,8 @@ def process_movie(movie_path: Path, output_root: Path, overwrite: bool) -> dict:
         geff.write(solution_nx, str(tracks_geff), zarr_format=3, overwrite=True)
     else:
         print("Warning: empty solution; no tracks.geff written")
+
+    sw.lap("write_tracks_s")
 
     # Post-hoc flow scoring + filtering. Keep the raw solver GEFF untouched.
     posthoc = {
@@ -302,6 +357,7 @@ def process_movie(movie_path: Path, output_root: Path, overwrite: bool) -> dict:
     else:
         print("Skipping post-hoc filtering for empty solution")
 
+    sw.lap("scoring_s")
     record = {
         "run_id": run_id,
         "reference_run_id": REFERENCE_RUN_ID,
@@ -313,12 +369,12 @@ def process_movie(movie_path: Path, output_root: Path, overwrite: bool) -> dict:
         "path_schema": "relative-v1",
         "input_zarr": movie_path.name,
         "zarr_array_key": ZARR_ARRAY_KEY,
-        "output_dir": to_relative(movie_out, output_root),
-        "output_blobs_csv": to_relative(blobs_csv, output_root),
-        "output_flow_zarr": to_relative(flow_zarr, output_root),
-        "output_geff": to_relative(tracks_geff, output_root),
-        "output_flow_scores_csv": to_relative(flow_scores_csv, output_root),
-        "output_clean_geff": to_relative(tracks_clean_geff, output_root),
+        "output_dir": to_relative(final_out, output_root),
+        "output_blobs_csv": to_relative(final_out / blobs_csv.name, output_root),
+        "output_flow_zarr": to_relative(final_out / flow_zarr.name, output_root),
+        "output_geff": to_relative(final_out / tracks_geff.name, output_root),
+        "output_flow_scores_csv": to_relative(final_out / flow_scores_csv.name, output_root),
+        "output_clean_geff": to_relative(final_out / tracks_clean_geff.name, output_root),
         "image_shape": list(img_stack.shape),
         "n_blobs_raw": int(len(raw_blobs)),
         "n_blobs_input": int(len(blobs_df)),
@@ -339,9 +395,22 @@ def process_movie(movie_path: Path, output_root: Path, overwrite: bool) -> dict:
                                  "(TrainTracks.scoring)",
         },
         "posthoc_results": posthoc,
+        # where the time and memory went (all seconds; tracking_* split from the solver stats)
+        "timings_seconds": {
+            **sw.laps,
+            "tracking_graph_s": cand_stats["seconds_graph"],
+            "tracking_edges_s": cand_stats["seconds_edges"],
+            "tracking_solve_s": cand_stats["seconds_solve"],
+            "total_s": round(time.perf_counter() - t_start, 2),
+        },
+        "peak_rss_gb": _peak_rss_gb(),
     }
     write_json(metadata_json, record)
-    print(f"Wrote: {metadata_json}")
+    # Complete: swap the finished folder into place (the old one, if any, is removed only now).
+    if final_out.exists():
+        shutil.rmtree(final_out)
+    os.replace(movie_out, final_out)
+    print(f"Wrote: {final_out / 'metadata.json'}")
     return record
 
 
@@ -381,9 +450,23 @@ def write_summary(records: list[dict], path: Path) -> None:
         writer.writerows(records)
 
 
+def _movie_job(job: dict) -> dict:
+    """Worker entry point (module level so a spawn-based process pool can import it)."""
+    return process_movie(
+        Path(job["movie_path"]), Path(job["output_root"]), job["overwrite"], job["skip_existing"]
+    )
+
+
+def _records_from_metadata(output_dir: Path) -> list[dict]:
+    return [json.loads(p.read_text()) for p in sorted(output_dir.glob("*/metadata.json"))]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Run the validated tracking configuration over a folder of Zarr movies."
+        description="Run the validated tracking configuration over a folder of Zarr movies.",
+        epilog="Parallelism: --jobs N runs N movies at once in a local process pool; on a SLURM "
+        "job array each array task takes its share of the movies automatically "
+        "(or pass --task-index / --num-tasks). See docs/parallel_and_hpc.md.",
     )
     parser.add_argument(
         "input_dir",
@@ -398,15 +481,32 @@ def main() -> int:
         default=None,
         help="Output root (default: results_root from the config, else <input_dir>/tracking_batch)",
     )
+    parser.add_argument("--movie", action="append", help="Movie id to run; repeat for several (default: all)")
     parser.add_argument(
         "--overwrite",
         action="store_true",
         help="Replace an existing per-movie output directory",
     )
     parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="Skip movies whose output is already complete (resume an interrupted batch)",
+    )
+    parser.add_argument(
         "--stop-on-error",
         action="store_true",
         help="Stop the batch at the first failed movie",
+    )
+    parser.add_argument("--jobs", default=None, help="Movies to run at once: an integer or 'auto' (default: auto)")
+    parser.add_argument("--threads-per-job", type=int, default=None, help="Cap on threads used by each movie")
+    parser.add_argument("--profile", default=None, help="Resource profile from TrainTracks.toml ([profiles.NAME])")
+    parser.add_argument("--task-index", type=int, default=None, help="This task's shard index (cluster job arrays)")
+    parser.add_argument("--num-tasks", type=int, default=None, help="Total number of shards (cluster job arrays)")
+    parser.add_argument("--log-dir", type=Path, default=None, help="Per-movie logs when --jobs > 1 (default: <output>/logs)")
+    parser.add_argument(
+        "--summarize-only",
+        action="store_true",
+        help="Do not run anything; rebuild batch_summary.csv from the metadata.json files in the output folder",
     )
     args = parser.parse_args()
 
@@ -428,33 +528,76 @@ def main() -> int:
         output_dir = input_dir / "tracking_batch"
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    summary_csv = output_dir / "batch_summary.csv"
+    if args.summarize_only:
+        records = _records_from_metadata(output_dir)
+        if not records:
+            parser.error(f"no <movie>/metadata.json found in {output_dir}")
+        write_summary(records, summary_csv)
+        print(f"Wrote batch summary for {len(records)} movies: {summary_csv}")
+        return 0
+
     movies = resolve_movie_dirs(input_dir)
-    print(f"Found {len(movies)} Zarr movies")
+    if args.movie:
+        wanted = set(args.movie)
+        unknown = wanted - {movie_id_of(m) for m in movies}
+        if unknown:
+            parser.error(f"unknown movie id(s): {sorted(unknown)}")
+        movies = [m for m in movies if movie_id_of(m) in wanted]
+    if args.num_tasks is not None:
+        index, count = (args.task_index or 0), args.num_tasks
+    else:
+        index, count = shard_from_env()
+    if count > 1:
+        movies = shard(movies, index, count)
+    if not movies:
+        parser.error("no movies to run")
+
+    res = resolve_resources(profile=args.profile, jobs=args.jobs, threads_per_job=args.threads_per_job)
+    jobs = min(res.jobs, len(movies))
+    print(f"Found {len(movies)} Zarr movies" + (f" (shard {index + 1}/{count})" if count > 1 else ""))
     print(f"Output root: {output_dir}")
+    print(f"Resources: {jobs} movie(s) at once, {res.threads_per_job} thread(s) each")
     print(f"Reference tracking run: {REFERENCE_RUN_ID}")
     print(json.dumps(json_safe(TRACKING_PARAMS), indent=2))
     print(f"Detection threshold: {DETECTION_PARAMS['threshold']}")
 
-    records = []
-    failures = []
+    job_list = [
+        {"id": movie_id_of(m), "movie_path": str(m), "output_root": str(output_dir),
+         "overwrite": args.overwrite, "skip_existing": args.skip_existing}
+        for m in movies
+    ]
 
-    for movie in movies:
-        try:
-            records.append(process_movie(movie, output_dir, args.overwrite))
-        except Exception as exc:
-            print(f"\nFAILED: {movie.name}: {exc}", file=sys.stderr)
-            traceback.print_exc()
-            failures.append({"input_zarr": str(movie), "error": str(exc)})
-            if args.stop_on_error:
-                break
+    def on_done(r, n_done, n_total):
+        status = "ok" if r.ok else f"FAILED ({r.error})"
+        print(f"[{n_done}/{n_total}] {r.item['id']}: {status} in {r.seconds:.0f}s", flush=True)
 
-    summary_csv = output_dir / "batch_summary.csv"
+    results = run_jobs(
+        _movie_job,
+        job_list,
+        jobs=jobs,
+        threads_per_job=res.threads_per_job,
+        log_dir=(args.log_dir or output_dir / "logs") if jobs > 1 else None,
+        name_of=lambda j: j["id"],
+        stop_on_error=args.stop_on_error,
+        on_done=on_done,
+    )
+    records = [r.value for r in results if r.ok]
+    failures = [{"input_zarr": r.item["movie_path"], "error": r.error} for r in results if not r.ok]
+    for r in results:
+        if not r.ok:
+            print(f"\nFAILED: {r.item['id']}: {r.error}", file=sys.stderr)
+            print(r.traceback, file=sys.stderr)
+
+    suffix = f".shard{index}of{count}" if count > 1 else ""  # shards must not overwrite each other
     if records:
-        write_summary(records, summary_csv)
-        print(f"\nWrote batch summary: {summary_csv}")
+        shard_summary = output_dir / f"batch_summary{suffix}.csv"
+        write_summary(records, shard_summary)
+        print(f"\nWrote batch summary: {shard_summary}"
+              + ("  (combine with --summarize-only after all shards finish)" if count > 1 else ""))
 
     if failures:
-        failures_json = output_dir / "batch_failures.json"
+        failures_json = output_dir / f"batch_failures{suffix}.json"
         write_json(failures_json, failures)
         print(f"Wrote failure log: {failures_json}", file=sys.stderr)
 

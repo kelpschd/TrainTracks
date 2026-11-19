@@ -59,14 +59,19 @@ def find_config_file(explicit: Path | str | None = None) -> Path | None:
     return None
 
 
-def _from_file(path: Path | None) -> dict:
+def load_toml(path: Path | None) -> dict:
+    """The whole parsed config file ({} if there is none)."""
     if path is None:
         return {}
     import tomllib  # stdlib in Python >= 3.11 (the project's required version)
 
     with path.open("rb") as f:
-        data = tomllib.load(f)
-    return data.get("paths", data)
+        return tomllib.load(f)
+
+
+def _from_file(path: Path | None) -> dict:
+    data = load_toml(path)
+    return data.get("paths", {k: v for k, v in data.items() if not isinstance(v, dict)})
 
 
 def load_paths(

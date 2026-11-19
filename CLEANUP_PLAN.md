@@ -106,20 +106,32 @@ numbered CLI wrappers into `pipeline/` and replace hard-coded paths and `IMG_NUM
 with arguments or one config file. Write pure functions (DataFrame in/out) so the
 napari plugin can wrap them later.
 
-**Phase 3b - Results folder migration (after Phase 3 code is in place).**
-Add `config.yaml` (or `TrainTracks.toml`) with `raw_root` and `results_root`, read by
-every `pipeline/` step; replace the per-script `--output_dir` defaults and the
-hard-coded `/Users/...` paths. Make `metadata.json` store paths relative to
-`results_root` (today they are absolute and stale: they point to
-`DS/raw_data/tracking_batch/...`, which was later renamed). Then, with write access
-or by hand: create `DS/results/`, move the contents of
-`DS/tracking_batch_TrainTracks/` there (the existing per-movie layout can be kept as is),
-move the repo's `flow.zarr` into `sg100_Well5_1018/archived_flow/` (if not already done), and move `analysis_20261026.qmd`/`Output_graphs` out
-of the batch folder (qmd to `analysis/` in the repo, figures to
-`results/figures/`). The qmd reads from its own folder with relative paths, so
-it needs a `results_root` parameter at the top. Confirm with a dry run on one movie
-before moving the rest, and leave the old batch folder in place until Phase 5's
-re-run reproduces the headline numbers.
+**Phase 3b - Fresh run into `DS/results/` (replaces "migrate the old outputs"; approved 2026-11-19).**
+The old outputs are NOT moved. A move would not look like a fresh run (old `metadata.json` has
+absolute, partly stale paths and stale `posthoc_results`; the geffs carry the old 63-bit IDs; files
+come from different code versions and dates), so instead:
+1. Rename `DS/tracking_batch_TrainTracks` to `..._archived_2026-11-19` (a rename: nothing copied or
+   deleted; `raw_data/` untouched). Copy `analysis_20261026.qmd` into the repo's `analysis/`.
+2. Create `TrainTracks.toml` (`raw_root`, `results_root = DS/results`, optional `[resources]`).
+3. Dry run on one movie into a scratch folder (`batch_pipeline.py --movie X --output-dir /tmp/s`),
+   then `compare_runs.py <archive> /tmp/s --movie X`. This is the first end-to-end run of
+   `process_movie` since the refactor. Record `timings_seconds` and `peak_rss_gb` from its metadata.
+4. Full run into `DS/results/` (`--jobs auto` or a profile; resumable with `--skip-existing`), then
+   `compare_runs.py <archive> DS/results` over all 32 movies. A `--jobs 1` vs `--jobs N` comparison on a
+   few movies confirms parallelism does not change results.
+5. Downstream scripts into `DS/results/`, in this order: `batch_traccuracy.py`, `batch_lyso_interaction.py`,
+   `batch_puncta_colocalization.py`, `batch_cotracking.py` (full sorted run: its permutation seeds are
+   `1000 + movie index`), then `summarize_cotracking_velocity.py`, `length_matched_speed.py`,
+   `leading_trailing.py`. Give the other batch scripts a `batch_root` default of `results_root` here.
+6. Compare the headline numbers with the archive (2903 clean tracks; 41268 / 9425 / 6895 tracks /
+   eligible / flagged; cotracking 7.6% vs 0.9%, p = 0.029), regenerate figures from `analysis/`.
+`results/` is final only when 3 to 6 agree; the archive stays untouched as the record.
+
+Speed: the September run took 98 min serial (83 s to 352 s per movie; time grows with blob count).
+`batch_pipeline.py` now supports `--jobs N|auto`, `--profile`, `--threads-per-job`, `--movie`,
+`--skip-existing`, SLURM job-array sharding and atomic per-movie output (see docs/parallel_and_hpc.md).
+Candidate speed-ups to profile first: building the candidate graph makes a full-frame mask per blob
+region (a bit-identical rewrite from region coordinates is likely much faster).
 
 **Phase 4 - Reproducibility.**
 `environment.yml` plus a lock file with the versions listed in TODO.md, add a smoke
@@ -127,11 +139,8 @@ test on a tiny synthetic movie, write the real README run order, and make the
 parameters used for the paper (thresholds, bin size, gap, cutoffs) a single
 `params.yaml` that the pipeline writes into every output's metadata.
 
-**Phase 5 - Paper-ready results.**
-Re-run the full 32-movie batch from the cleaned code, regenerate the tracks_clean
-files, the cotracking tables and `analysis.qmd` figures into `results/`, and confirm
-the headline numbers match the current ones (lysosome cotracking 7.6% vs 0.9%,
-p = 0.029; 2903 tracks). Tag `v1.0-paper-analysis`.
+**Phase 5 - Paper-ready results.** (Largely done by Phase 3b step 6: the fresh run IS the re-run.)
+Tag the commit that produced `DS/results/` (`v1.0-paper-analysis`) and keep `TrainTracks.toml` params in the methods.
 
 ## Verification at each phase
 Run one movie through the pipeline before and after and compare `tracks_clean`

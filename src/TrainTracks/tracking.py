@@ -14,6 +14,8 @@ networkx / scipy / scikit-image / motile are imported lazily inside the function
 
 from __future__ import annotations
 
+import time
+
 import numpy as np
 import pandas as pd
 
@@ -308,8 +310,10 @@ def run_tracking(blobs_df: pd.DataFrame, flow_raw: np.ndarray, n_frames: int, pa
     """Blobs (t, y, x) + flow (T-1, Y, X, 2) -> solved track graph.
 
     The sequence ``process_movie`` ran inline. ``params`` is ``TRACKING_PARAMS``.
-    Returns ``(solution_nx, candidate_stats)``.
+    Returns ``(solution_nx, candidate_stats)``; the stats include the seconds spent in the graph,
+    edge and solve steps (``seconds_graph`` / ``seconds_edges`` / ``seconds_solve``).
     """
+    t0 = time.perf_counter()
     blobs_np = blobs_df[["t", "y", "x"]].to_numpy(dtype=np.int64)
     cand = build_candidate_graph(
         blobs_np,
@@ -317,10 +321,17 @@ def run_tracking(blobs_df: pd.DataFrame, flow_raw: np.ndarray, n_frames: int, pa
         dilation_radius=params["dilation_radius"],
         n_frames=n_frames,
     )
+    t1 = time.perf_counter()
     add_candidate_edges(
         cand,
         max_edge_distance=params["max_edge_distance"],
         max_gap=params["max_gap"],
     )
+    t2 = time.perf_counter()
     stats = {"n_candidate_nodes": cand.number_of_nodes(), "n_candidate_edges": cand.number_of_edges()}
-    return solve_tracks(cand, params), stats
+    solution = solve_tracks(cand, params)
+    t3 = time.perf_counter()
+    stats.update(
+        seconds_graph=round(t1 - t0, 2), seconds_edges=round(t2 - t1, 2), seconds_solve=round(t3 - t2, 2)
+    )
+    return solution, stats

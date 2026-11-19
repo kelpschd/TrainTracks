@@ -23,3 +23,5 @@ moving a folder never leaves stale absolute paths.
 
 Checks: `pytest tests`, and `python scripts/check_regression.py detection|flow|tracking
 <movie_dir>` re-runs a pipeline stage and compares it with the stored outputs.
+
+Parallel and cluster runs: see `docs/parallel_and_hpc.md` (`batch_pipeline.py --jobs`, `--profile`, SLURM arrays).

@@ -6,3 +6,17 @@
 raw_root = "/Users/you/Documents/DataTecnica/TTU/Data/Sphere/220725_i11w-hT-M33-I76_sg1035_d10sphere/raw_data"
 # every pipeline output, zarr and csv, one folder per movie
 results_root = "/Users/you/Documents/DataTecnica/TTU/Data/Sphere/220725_i11w-hT-M33-I76_sg1035_d10sphere/results"
+
+# How many movies run at once, and how many threads each may use. Everything here is optional:
+# without it the pipeline sizes itself from the machine (performance cores and RAM). Pick a
+# profile with `--profile NAME`; `--jobs` / `--threads-per-job` override both.
+[resources]
+mem_per_job_gb = 8        # safety estimate that caps automatic --jobs; each run records the real peak
+
+[profiles.laptop]         # e.g. 12-core Mac (8 performance + 4 efficiency), 32 GB
+jobs = 3
+threads_per_job = 2
+
+[profiles.hpc_array]      # one movie per SLURM array task (sbatch --array=0-31 --cpus-per-task=8)
+jobs = 1
+threads_per_job = 8

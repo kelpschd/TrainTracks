@@ -124,6 +124,11 @@ Items in a tier are roughly ordered; tiers are not.
       (`IMG_NUM = 9` selects the movie by glob order), `flow_vis.py`,
       `track_vis_extra.py` (stale `/Users/dankelpsch/` paths).
 
+- [ ] **Profile and speed up the pipeline.** Per-stage timings and peak memory are now written to each
+      movie's metadata.json (`timings_seconds`, `peak_rss_gb`). Check first: `tracking_graph_s` (the
+      candidate graph makes a full-frame boolean mask per blob region; using regionprops coordinates
+      should be bit-identical and much faster; verify with `check_regression.py tracking` and
+      `compare_runs.py`).
 - [ ] **Add one end-to-end smoke test** on a small synthetic movie with known
       tracks (detect -> flow -> solve -> score -> clean -> traccuracy).
       Would have caught every Tier 1 item.
