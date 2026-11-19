@@ -75,7 +75,6 @@ def build_candidate_graph(
 
         for regionprop in props:
             node_id = int(regionprop.label) + last_node_id
-            region = segmentation == regionprop.label
             centroid = (
                 float(regionprop.centroid[0]),
                 float(regionprop.centroid[1]),
@@ -84,9 +83,15 @@ def build_candidate_graph(
             if flow_frame is None:
                 flow_vec = (0.0, 0.0)
             else:
+                # Read the region's own pixels (regionprops.coords is in row-major order, the same
+                # order a full-frame boolean mask gives). Building a full 2048x2048 mask per region,
+                # as this used to, made this step ~90% of the run time of a movie; the values are
+                # bit-identical (tests/test_tracking_equivalence.py).
+                rr, cc = regionprop.coords[:, 0], regionprop.coords[:, 1]
+                region_flow = flow_frame[rr, cc]
                 flow_vec = (
-                    float(np.mean(flow_frame[region][..., 1])),
-                    float(np.mean(flow_frame[region][..., 0])),
+                    float(np.mean(region_flow[..., 1])),
+                    float(np.mean(region_flow[..., 0])),
                 )
 
             cand_graph.add_node(
