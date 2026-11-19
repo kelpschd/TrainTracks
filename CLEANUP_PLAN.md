@@ -53,6 +53,9 @@ TrainTracks/
   TODO.md                tracked (remove from .gitignore)
 ```
 
+## Status
+Phase 0 done, Phase 1 done, Phase 2 done (2026-11-19). Next: Phase 3.
+
 ## Phases (do in order; commit after each)
 
 **Phase 0 - Freeze the science first (small, but do before moving anything).**
