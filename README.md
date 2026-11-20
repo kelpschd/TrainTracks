@@ -10,8 +10,9 @@ whether puncta travel with organelles more often than chance (cotracking).
 ## Getting started
 
 ```bash
-conda env create -f environment.yml     # Python 3.11 + the dependencies declared in pyproject.toml
+conda create -n TrainTracks python=3.11
 conda activate TrainTracks
+pip install -e ".[test]"                # the dependencies are declared in pyproject.toml
 pytest tests                            # all tests should pass
 ```
 
