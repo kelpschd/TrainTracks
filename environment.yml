@@ -1,0 +1,10 @@
+# Minimal environment: Python 3.11 plus the dependencies declared in pyproject.toml (loose versions).
+# For the exact tested versions also run:  pip install -r requirements-lock.txt  then  pip install -e . --no-deps
+name: TrainTracks
+channels:
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - -e ".[test]"

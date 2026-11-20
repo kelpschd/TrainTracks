@@ -54,7 +54,7 @@ TrainTracks/
 ```
 
 ## Status
-Update 2026-11-20: fresh run into DS/results done and verified against the archive (pipeline, traccuracy, organelle, coloc, cotracking summaries). README rewritten (run order, settings, checks, layout). Remaining: environment lock file, `--jobs` for puncta/cotracking, analysis qmd paths (user will do later), kymograph analysis (user), second pass over `notebooks/` placeholder and `cotracking/cotracking_section.qmd`.
+Update 2026-11-20: fresh run into DS/results done and verified against the archive (pipeline, traccuracy, organelle, coloc, cotracking summaries). README rewritten (run order, settings, checks, layout). Environment: `environment.yml`, `requirements-lock.txt` (full freeze, one trackpy version still to fill in) and the missing dependencies (traccuracy, dask, matplotlib, trackpy, filterpy) added to `pyproject.toml` on 2026-11-20. Remaining: `--jobs` for puncta/cotracking, analysis qmd paths (user will do later), kymograph analysis (user), second pass over `notebooks/` placeholder and `cotracking/cotracking_section.qmd`.
 Phase 0, 1, 2 done (2026-11-19). Phase 3 in progress:
 - 3.1 done: `src/TrainTracks/ids.py` and `tracks_io.py` replace 5 copies of
   `geff_to_track_df` and 3 of the uid helpers (behaviour-identical; see tests/).

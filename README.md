@@ -10,18 +10,21 @@ whether puncta travel with organelles more often than chance (cotracking).
 ## Getting started
 
 ```bash
-conda create -n TrainTracks python=3.11
+conda env create -f environment.yml     # Python 3.11 + the dependencies declared in pyproject.toml
 conda activate TrainTracks
-pip install -e ".[test]"
-pytest tests                       # all tests should pass
+pytest tests                            # all tests should pass
 ```
+
+To reproduce the exact tested versions instead of the loose ones in `pyproject.toml`, add
+`pip install -r requirements-lock.txt` and then `pip install -e . --no-deps` (read the header of
+`requirements-lock.txt` first: it is a full freeze of the working environment).
 
 Python must be 3.11 (`requires-python = ">=3.11,<3.12"`); the base conda environment will not install it.
 
 Tested with: numpy 2.4.6, pandas 3.0.5, zarr 3.1.6, scipy 1.17.1, scikit-image 0.26.0, opencv-python
 5.0.0.93, networkx 3.6.1, motile 1.0.1, motile-tracker 5.0.1, funtracks 2.0.2, geff 1.3.0.1.2, nd2
-0.11.3, napari 0.7.1. Keep scikit-image at 0.26.x for now: two functions the pipeline uses are deprecated
-there and the replacements are not drop-in (see `TODO.md`).
+0.11.3, napari 0.7.1. `pyproject.toml` keeps scikit-image below 0.28: two functions the pipeline uses are deprecated in 0.26
+and the replacements are not drop-in (see `TODO.md`).
 
 ## Where the data live
 
