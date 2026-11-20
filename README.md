@@ -1,11 +1,12 @@
 # TrainTracks
 
-Track fast-moving puncta in live-cell movies, clean the tracks automatically, and analyse how they
-interact with lysosomes and mitochondria. Raw data are 4-channel ND2 movies (channel 0 = puncta,
-1 = lysosome, 2 = mitochondria, 3 = BFP, ignored). The pipeline detects blobs, estimates optical
-flow, links detections into tracks with an integer program (motile), scores every track against the
-flow, and removes short and erratic tracks. Downstream scripts measure organelle contact and test
-whether puncta travel with organelles more often than chance (cotracking).
+A pipeline to track single particles live-cell movies, clean the tracks automatically, and analyse 
+how they interact with lysosomes and mitochondria. Raw data are multi-channel ND2 or zarr files 
+(channel 0 = puncta, 1 = lysosome, 2 = mitochondria, 3 = BFP, ignored). The pipeline detects puncta 
+on each frame, estimates optical flow across frames, links detections into tracks with an integer 
+linear program solver, scores every track against the flow, and removes short and erratic tracks. 
+Downstream scripts measure organelle contact, examine whether puncta travel with organelles (cotracking),
+and particle movement/track characteristics. 
 
 ## Getting started
 
@@ -24,16 +25,15 @@ Python must be 3.11 (`requires-python = ">=3.11,<3.12"`); the base conda environ
 
 Tested with: numpy 2.4.6, pandas 3.0.5, zarr 3.1.6, scipy 1.17.1, scikit-image 0.26.0, opencv-python
 5.0.0.93, networkx 3.6.1, motile 1.0.1, motile-tracker 5.0.1, funtracks 2.0.2, geff 1.3.0.1.2, nd2
-0.11.3, napari 0.7.1. `pyproject.toml` keeps scikit-image below 0.28: two functions the pipeline uses are deprecated in 0.26
-and the replacements are not drop-in (see `TODO.md`).
+0.11.3, napari 0.7.1. 
 
 ## Where the data live
 
-Data stay outside the repo, in two folders side by side under the dataset root:
+Data exist outside of the repo, in two folders side by side under the experiment root:
 
 ```
-<dataset>/raw_data/   the .nd2 files and their .zarr conversions (nothing else)
-<dataset>/results/    every pipeline output (zarr and csv), one folder per movie
+<experiment>/raw_data/   the .nd2 files and their .zarr conversions (nothing else)
+<experiment>/results/    every pipeline output (zarr and csv), one folder per movie
 ```
 
 Tell the code where they are, in order of priority: CLI flags, the environment variables
@@ -44,8 +44,8 @@ to these roots, so moving or renaming a folder never leaves stale absolute paths
 
 ## Running the pipeline
 
-The commands below assume `TrainTracks.toml` is set up and `DS` points at the dataset root
-(`export DS=/path/to/dataset`). Run them from the repo root.
+The commands below assume `TrainTracks.toml` is set up and `DS` points at the experiment root
+(`export DS=/path/to/experiment`). Run them from the repo root.
 
 | Step | Command | Writes |
 |---|---|---|
@@ -55,7 +55,7 @@ The commands below assume `TrainTracks.toml` is set up and `DS` points at the da
 | 3. Organelle contact | `python scripts/batch_lyso_interaction.py "$DS/results" --raw-root "$DS/raw_data"` | per movie `organelle/`; `organelle_interaction_{detections,tracks}.csv` |
 | 4. Colocalization | `python scripts/batch_puncta_colocalization.py "$DS/results" --raw-root "$DS/raw_data"` | per movie `coloc/`; `organelle_coloc_{detections,tracks}.csv` |
 | 5. Cotracking | `python cotracking/batch_cotracking.py "$DS/results" --raw-root "$DS/raw_data"` | `cotracking/<movie>/...` |
-| 6. Pool cotracking | `python cotracking/summarize_cotracking_velocity.py "$DS/results/cotracking"` | `cotracking/summary/` tables and figure |
+| 6. Pool cotracking | `python cotracking/summarize_cotracking_velocity.py "$DS/results/cotracking"` | `cotracking/summary/` tables (read by the analysis qmd; figures are made there) |
 
 Refresh `batch_summary.csv` from the per-movie metadata at any time with
 `python scripts/batch_pipeline.py --summarize-only`. Every step is resumable: `batch_pipeline.py` and
