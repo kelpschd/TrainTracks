@@ -105,3 +105,8 @@ The per-frame leading/trailing analysis (`leading_trailing.py` plus two function
 archived in `archive/leading_trailing_2026-11/`. It gave only a small, inconclusive trailing lean and was
 likely affected by Kalman lag and possible channel-timing offsets. It will be redone as a kymograph
 analysis; do not cite the old numbers.
+
+## Length-matched speed (script removed 2026-11-20)
+
+`length_matched_speed.py` is archived (`archive/length_matched_speed_2026-11/`); the length-matched comparison
+of cotracking vs never-cotracking track speed is computed in the analysis `.qmd`.
