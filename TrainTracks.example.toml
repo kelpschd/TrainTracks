@@ -1,0 +1,24 @@
+# Copy to TrainTracks.toml (gitignored) and edit. Both folders live side by side under the
+# dataset root. Command-line flags and the TRAINTRACKS_RAW_ROOT / TRAINTRACKS_RESULTS_ROOT
+# environment variables override these values.
+[paths]
+# nd2 files and their .zarr conversions (written by scripts/import_export.py); nothing else
+raw_root = "/Users/you/Documents/DataTecnica/TTU/Data/Sphere/220725_i11w-hT-M33-I76_sg1035_d10sphere/raw_data"
+# every pipeline output, zarr and csv, one folder per movie
+results_root = "/Users/you/Documents/DataTecnica/TTU/Data/Sphere/220725_i11w-hT-M33-I76_sg1035_d10sphere/results"
+
+# How many movies run at once, and how many threads each may use. Everything here is optional:
+# without it the pipeline sizes itself from the machine (performance cores and RAM). Pick a
+# profile with `--profile NAME`; `--jobs` / `--threads-per-job` override both.
+[resources]
+# mem_per_job_gb = 4      # optional: pin a fixed memory estimate; by default it is modelled from the
+#                         # threads per job (about 1.6 + 0.9 x threads GB, measured). Each run records
+#                         # the real peak (peak_rss_gb) in metadata.json to check it.
+
+[profiles.laptop]         # e.g. 12-core Mac (8 performance + 4 efficiency), 32 GB
+jobs = 4
+threads_per_job = 2
+
+[profiles.hpc_array]      # one movie per SLURM array task (sbatch --array=0-31 --cpus-per-task=8)
+jobs = 1
+threads_per_job = 8

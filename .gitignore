@@ -8,7 +8,20 @@
 *.webp
 *.csv
 metadata.json
-TODO.md
+
+# ...but keep the small, hand-curated files that matter for reproducibility
+!sg100_Well5_1018_valid_tracks.csv
+!ground_truth/*.csv
+!tracking_runs/tracking_log.csv
+!archive/**/tracking_log.csv
+
+# local machine paths (copy TrainTracks.example.toml)
+TrainTracks.toml
+
+# editor / OS / tool scratch
+.DS_Store
+.Rhistory
+.claude/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -81,7 +94,6 @@ instance/
 .scrapy
 
 # Pdoc documentation
-docs/
 
 # PyBuilder
 target/

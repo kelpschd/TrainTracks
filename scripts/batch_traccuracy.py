@@ -45,10 +45,7 @@ from traccuracy.matchers import PointMatcher
 from funtracks.import_export import import_from_geff
 
 
-DEFAULT_GT_ROOT = Path(
-    "/Users/kelpschdj/Documents/DataTecnica/TTU/Data/Sphere/"
-    "220725_i11w-hT-M33-I76_sg1035_d10sphere/tracking_results"
-)
+DEFAULT_GT_ROOT = Path(__file__).resolve().parents[1] / "ground_truth"   # <repo>/ground_truth
 DEFAULT_MATCH_THRESHOLD = 15.0
 
 # These are the metrics used in the existing traccuracy scripts as the
@@ -401,7 +398,8 @@ def main():
 
     movie_dirs = sorted(
         p for p in batch_root.iterdir()
-        if p.is_dir() and p.name != "traccuracy"
+        # movie folders only (the batch root also holds cotracking/, Output_graphs/, ...)
+        if p.is_dir() and (p / "metadata.json").exists()
     )
     if args.movie:
         requested = set(args.movie)

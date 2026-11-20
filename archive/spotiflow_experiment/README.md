@@ -8,9 +8,13 @@ settings were built around LoG output, so this was not a neutral comparison.
 Contents: scripts/ (detection, sweeps, comparison, napari viewers), blobs/
 (Spotiflow detection CSVs), results/ (summary tables and plots).
 
-Not moved: two Spotiflow tracking runs remain in tracking_runs/runs/ (notes
-"SF raw p0.3 bf10", "SF bgsub p0.3 bf10") plus their rows in tracking_log.csv.
+Not moved here: two Spotiflow tracking runs are in
+../legacy_single_movie/tracking_runs/runs/ (notes "SF raw p0.3 bf10", "SF bgsub p0.3 bf10")
+plus their rows in ../legacy_single_movie/tracking_runs/tracking_log.csv.
+(Moved from the repo root during cleanup, 2026-11-19.)
 
-To re-run: these scripts import preprocess_blob_det / traccuracy_compare from
-the main scripts/ folder, so run with that folder on PYTHONPATH, e.g.
+To re-run: these scripts import preprocess_blob_det and traccuracy_compare
+(both now in archive/exploration_2026-09/scripts/), and their
+hard-coded BASE / blobs / tracking_runs paths point at the old layout. Easiest is to
+check out tag pre-cleanup-2026-11-19, where everything is in its original place:
   PYTHONPATH=scripts python spotiflow_experiment/scripts/spotiflow_detect.py

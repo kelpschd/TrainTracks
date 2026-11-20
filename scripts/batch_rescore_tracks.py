@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Batch-rescore existing tracking outputs with the current track_flow_score.py.
+Batch-rescore existing tracking outputs with the current TrainTracks.scoring.
 
 IMPORTANT:
     This does NOT rerun blob detection, optical flow, candidate graph creation,
     Motile, or any track filtering. It only recalculates flow_scores.csv for
-    each existing movie using the CURRENT contents of track_flow_score.py.
+    each existing movie using the CURRENT contents of src/TrainTracks/scoring.py.
 
 Expected layout:
     tracking_batch/
@@ -27,31 +27,17 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import shutil
 import traceback
 
-import networkx as nx
-import geff
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import zarr
-from funtracks.import_export import import_from_geff
-
-
-DEFAULT_SCORER = Path(__file__).with_name("track_flow_score.py")
-
-
-def load_scorer(path: Path):
-    spec = importlib.util.spec_from_file_location("track_flow_score_batch", path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Could not load scorer module from {path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+from TrainTracks.scoring import MIN_SPAN_KEEP, make_flow_sampler, score_all, write_clean_geff
+from TrainTracks.tracks_io import geff_to_track_df
 
 
 def read_metadata(path: Path) -> dict:
@@ -59,67 +45,7 @@ def read_metadata(path: Path) -> dict:
         return json.load(f)
 
 
-def geff_to_track_df(scorer, geff_path: Path) -> pd.DataFrame:
-    sg = import_from_geff(
-        directory=str(geff_path),
-        node_name_map={"time": "t", "pos": ["y", "x"]},
-    )
-    # Reuse the user's current scorer conversion logic where available.
-    return scorer.geff_to_track_df(sg)
-
-
-def write_clean_geff(movie_dir: Path, track_df: pd.DataFrame, feats: pd.DataFrame, min_span_keep: int) -> dict:
-    """Rebuild tracks_clean.geff from the CURRENT score decisions.
-
-    The raw tracks.geff is never modified. Short tracks (span < MIN_SPAN_KEEP)
-    and tracks with scorer flag == True are excluded. The original numeric
-    particle/tracklet_id values are preserved in the clean GEFF.
-    """
-    if "flagged" not in feats.columns:
-        raise ValueError("Score table is missing required 'flagged' column")
-    if "span" not in feats.columns:
-        raise ValueError("Score table is missing required 'span' column")
-
-    flagged_ids = set(feats.index[feats["flagged"].fillna(False).astype(bool)].astype(int))
-    short_ids = set(feats.index[feats["span"].astype(float) < min_span_keep].astype(int))
-    drop_ids = flagged_ids | short_ids
-
-    keep = track_df[~track_df["particle"].astype(int).isin(drop_ids)].copy()
-    keep = keep.sort_values(["particle", "frame"]).reset_index(drop=True)
-
-    g = nx.DiGraph()
-    next_id = 0
-    for pid, group in keep.groupby("particle", sort=True):
-        prev = None
-        for _, row in group.iterrows():
-            nid = next_id
-            next_id += 1
-            g.add_node(
-                nid,
-                t=int(row["frame"]),
-                y=float(row["y"]),
-                x=float(row["x"]),
-                track_id=int(pid),
-                tracklet_id=int(pid),
-            )
-            if prev is not None:
-                g.add_edge(prev, nid)
-            prev = nid
-
-    out = movie_dir / "tracks_clean.geff"
-    geff.write(g, str(out), zarr_format=3, overwrite=True)
-
-    return {
-        "clean_geff": str(out),
-        "n_clean_tracks": int(keep["particle"].nunique()) if len(keep) else 0,
-        "n_clean_detections": int(len(keep)),
-        "n_short_removed": len(short_ids),
-        "n_flagged_removed": len(flagged_ids),
-        "n_tracks_removed": len(drop_ids),
-    }
-
-
-def rescore_movie(movie_dir: Path, scorer, no_backup: bool = False, write_clean: bool = False) -> dict:
+def rescore_movie(movie_dir: Path, no_backup: bool = False, write_clean: bool = False) -> dict:
     meta_path = movie_dir / "metadata.json"
     raw_geff = movie_dir / "tracks.geff"
     flow_path = movie_dir / "flow.zarr"
@@ -133,10 +59,10 @@ def rescore_movie(movie_dir: Path, scorer, no_backup: bool = False, write_clean:
     meta = read_metadata(meta_path) if meta_path.exists() else {}
     flow_root = zarr.open_group(str(flow_path), mode="r")
     flow_raw = np.asarray(flow_root["flow_raw"])
-    flow_vec = scorer.make_flow_sampler(flow_raw)
+    flow_vec = make_flow_sampler(flow_raw)
 
-    track_df = geff_to_track_df(scorer, raw_geff)
-    feats = scorer.score_all(track_df, flow_vec)
+    track_df = geff_to_track_df(raw_geff)
+    feats = score_all(track_df, flow_vec)
 
     if scores_path.exists() and not no_backup:
         backup = scores_path.with_name("flow_scores_pre_rescore.csv")
@@ -148,10 +74,7 @@ def rescore_movie(movie_dir: Path, scorer, no_backup: bool = False, write_clean:
     clean_result = {}
     if write_clean:
         clean_result = write_clean_geff(
-            movie_dir,
-            track_df,
-            feats,
-            min_span_keep=int(getattr(scorer, "MIN_SPAN_KEEP", 5)),
+            track_df, feats, movie_dir / "tracks_clean.geff", min_span_keep=MIN_SPAN_KEEP,
         )
 
     flagged = int(feats["flagged"].sum()) if "flagged" in feats.columns else 0
@@ -198,10 +121,6 @@ def main():
         description="Recompute flow_scores.csv for existing batch tracking outputs."
     )
     parser.add_argument("batch_root", type=Path)
-    parser.add_argument(
-        "--scorer", type=Path, default=DEFAULT_SCORER,
-        help=f"Updated track_flow_score.py to import (default: {DEFAULT_SCORER})",
-    )
     parser.add_argument("--movie", action="append", help="Movie id; repeat for multiple movies")
     parser.add_argument("--no-backup", action="store_true", help="Do not save the old flow_scores.csv")
     parser.add_argument("--strict", action="store_true", help="Stop on first failure")
@@ -209,15 +128,9 @@ def main():
     args = parser.parse_args()
 
     batch_root = args.batch_root.expanduser().resolve()
-    scorer_path = args.scorer.expanduser().resolve()
 
     if not batch_root.is_dir():
         raise FileNotFoundError(f"Batch directory not found: {batch_root}")
-    if not scorer_path.exists():
-        raise FileNotFoundError(f"Scorer not found: {scorer_path}")
-
-    scorer = load_scorer(scorer_path)
-
     movie_dirs = sorted(
         p for p in batch_root.iterdir()
         if p.is_dir() and (p / "tracks.geff").exists()
@@ -229,7 +142,6 @@ def main():
         raise FileNotFoundError(f"No movie directories with tracks.geff found in {batch_root}")
 
     print(f"Batch root: {batch_root}")
-    print(f"Scorer   : {scorer_path}")
     print(f"Movies   : {len(movie_dirs)}")
     print()
 
@@ -241,7 +153,7 @@ def main():
         print(f"MOVIE: {movie_dir.name}")
         print("=" * 80)
         try:
-            row = rescore_movie(movie_dir, scorer, no_backup=args.no_backup, write_clean=args.write_clean)
+            row = rescore_movie(movie_dir, no_backup=args.no_backup, write_clean=args.write_clean)
             rows.append(row)
             print(
                 f"tracks={row['n_tracks']} | detections={row['n_detections']} | "
@@ -263,8 +175,16 @@ def main():
 
     summary_path = batch_root / "batch_rescore_summary.csv"
     if rows:
-        pd.DataFrame(rows).to_csv(summary_path, index=False)
-        print(f"\nSaved summary: {summary_path}")
+        summary = pd.DataFrame(rows)
+        # A --movie run must not wipe the other movies' rows: merge by movie.
+        if summary_path.exists():
+            old = pd.read_csv(summary_path)
+            if "movie" in old.columns:
+                old = old[~old["movie"].isin(summary["movie"])]
+                summary = pd.concat([old, summary], ignore_index=True)
+                summary = summary.sort_values("movie").reset_index(drop=True)
+        summary.to_csv(summary_path, index=False)
+        print(f"\nSaved summary: {summary_path} ({len(summary)} movies)")
 
     if errors:
         error_path = batch_root / "batch_rescore_errors.csv"

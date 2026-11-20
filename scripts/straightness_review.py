@@ -3,7 +3,7 @@
 Visualize tracks colored by path_straightness to pick a transport filter threshold.
 
 Works with both the single-run layout (candidate_graph.py) and the batch layout
-(batch_pipeline_with_posthoc.py).
+(batch_pipeline.py).
 
 Single-run usage:
     python batch_straightness_review.py \\
@@ -28,7 +28,9 @@ import napari
 import numpy as np
 import pandas as pd
 import zarr
-from funtracks.import_export import import_from_geff
+from TrainTracks.config import resolve_input_zarr, resolve_stored_path
+from TrainTracks.ids import add_track_uids
+from TrainTracks.tracks_io import geff_to_track_df
 
 DEFAULT_CUTOFFS = [0.4, 0.5, 0.6, 0.7]
 
@@ -36,20 +38,6 @@ DEFAULT_CUTOFFS = [0.4, 0.5, 0.6, 0.7]
 def read_json(path: Path) -> dict:
     with path.open() as f:
         return json.load(f)
-
-
-def geff_to_track_df(geff_path: Path) -> pd.DataFrame:
-    sg = import_from_geff(
-        directory=str(geff_path),
-        node_name_map={"time": "t", "pos": ["y", "x"]},
-    )
-    attrs = sg.graph.node_attrs(unpack=True).to_pandas()
-    return pd.DataFrame({
-        "particle": attrs["tracklet_id"].astype(int),
-        "frame":    attrs["t"].astype(int),
-        "y":        attrs["pos_0"].astype(float),
-        "x":        attrs["pos_1"].astype(float),
-    }).sort_values(["particle", "frame"]).reset_index(drop=True)
 
 
 def tracks_array(df: pd.DataFrame) -> np.ndarray:
@@ -80,7 +68,9 @@ def resolve_paths(args) -> tuple[Path, Path, Path, Path]:
                 "Pass --flow explicitly."
             )
         meta = read_json(meta_path)
-        flow_path = Path(meta.get("flow_path") or meta.get("output_flow_zarr", ""))
+        flow_path = resolve_stored_path(
+            meta.get("flow_path") or meta.get("output_flow_zarr", ""), run_dir.parent
+        )
         if not flow_path.exists():
             raise FileNotFoundError(
                 f"flow.zarr not found at {flow_path}. Pass --flow explicitly."
@@ -106,8 +96,7 @@ def resolve_paths(args) -> tuple[Path, Path, Path, Path]:
             meta = read_json(meta_path)
             input_zarr = meta.get("input_zarr", "")
             movie_id = Path(input_zarr).stem.replace(".zarr", "")
-            # try sibling of the run dir's grandparent (tracking_runs layout)
-            gt_path = run_dir.parent.parent / f"{movie_id}_valid_tracks.csv"
+            gt_path = Path(__file__).resolve().parents[1] / "ground_truth" / f"{movie_id}_valid_tracks.csv"
         else:
             gt_path = Path("__missing__")
 
@@ -159,7 +148,10 @@ def main():
         meta_path = run_dir / "metadata.json"
         if meta_path.exists():
             meta = read_json(meta_path)
-            img_path = Path(meta.get("input_zarr", ""))
+            try:
+                img_path = resolve_input_zarr(meta, run_dir)
+            except FileNotFoundError:
+                img_path = None
     if img_path is None or not img_path.exists():
         raise FileNotFoundError(
             f"Image zarr not found at {img_path}. Pass --image explicitly."
@@ -174,10 +166,11 @@ def main():
     print(f"Tracks    : {track_df['particle'].nunique()} total")
 
     # --- Scores ---
+    # Join on track_uid ONLY: funtracks renumbers `particle` on every import, so the
+    # `particle` in flow_scores.csv does not match the one from this import.
     feats = pd.read_csv(scores_path)
-    feats["particle"] = feats["particle"].astype(int)
 
-    required = {"particle", "eligible", "path_straightness", "net_displacement", "turn_incoherence"}
+    required = {"track_uid", "eligible", "path_straightness", "net_displacement", "turn_incoherence"}
     missing = required - set(feats.columns)
     if missing:
         raise ValueError(
@@ -185,14 +178,14 @@ def main():
             "Re-run track_flow_score.py to regenerate."
         )
 
-    eligible_ids = set(feats.loc[feats["eligible"].astype(str) == "True", "particle"])
-    eligible_df = track_df[track_df["particle"].isin(eligible_ids)].copy()
+    eligible_uids = set(feats.loc[feats["eligible"].astype(str) == "True", "track_uid"])
+    eligible_df = track_df[track_df["track_uid"].isin(eligible_uids)].copy()
 
-    feat_lookup = feats.set_index("particle")[
+    feat_lookup = feats.set_index("track_uid")[
         ["path_straightness", "net_displacement", "turn_incoherence"]
     ]
     for col in ["path_straightness", "net_displacement", "turn_incoherence"]:
-        eligible_df[col] = eligible_df["particle"].map(feat_lookup[col])
+        eligible_df[col] = eligible_df["track_uid"].map(feat_lookup[col])
 
     n_eligible = eligible_df["particle"].nunique()
     n_ineligible = track_df["particle"].nunique() - n_eligible
@@ -204,7 +197,7 @@ def main():
         kept = feats[
             (feats["eligible"].astype(str) == "True") &
             (feats["path_straightness"] >= c)
-        ]["particle"].nunique()
+        ]["track_uid"].nunique()
         print(f"  path_straightness >= {c:.2f}: {kept:4d} / {n_eligible} ({kept/n_eligible*100:.1f}%)")
 
     # --- GT ---
@@ -216,15 +209,15 @@ def main():
         print(f"\nGT        : {gt_tracks['particle'].nunique()} validated tracks")
 
         # Report straightness of GT tracks if they can be matched by particle id
-        gt_pids = set(gt_tracks["particle"].astype(int))
-        matched = feats[feats["particle"].isin(gt_pids)]
+        gt_uids = set(add_track_uids(gt_tracks)["track_uid"])
+        matched = feats[feats["track_uid"].isin(gt_uids)]
         if not matched.empty:
-            print("GT track straightness (if particle IDs match scored tracks):")
+            print("GT track straightness (GT trajectories identical to a scored track):")
             for _, row in matched.iterrows():
-                print(f"  particle {int(row['particle'])}: straightness={row['path_straightness']:.3f} "
+                print(f"  track {row['track_uid'][:8]}: straightness={row['path_straightness']:.3f} "
                       f"net_disp={row['net_displacement']:.1f} turn={row['turn_incoherence']:.3f}")
         else:
-            print("(GT particle IDs don't match scored track IDs — spatial matching needed)")
+            print("(no GT trajectory is identical to a scored track — spatial matching needed)")
     else:
         print(f"\nGT CSV not found at {gt_path} — skipping (pass --gt to include)")
 
@@ -253,9 +246,9 @@ def main():
         kept_ids = feats.loc[
             (feats["eligible"].astype(str) == "True") &
             (feats["path_straightness"] >= cutoff),
-            "particle"
-        ].astype(int)
-        kept_df = eligible_df[eligible_df["particle"].isin(kept_ids)]
+            "track_uid"
+        ]
+        kept_df = eligible_df[eligible_df["track_uid"].isin(kept_ids)]
         viewer.add_tracks(
             tracks_array(kept_df),
             name=f"straightness >= {cutoff:.2f}  ({kept_df['particle'].nunique()} tracks)",
@@ -263,7 +256,7 @@ def main():
         )
 
     # Ineligible/short tracks for reference
-    ineligible_df = track_df[~track_df["particle"].isin(eligible_ids)]
+    ineligible_df = track_df[~track_df["track_uid"].isin(eligible_uids)]
     if not ineligible_df.empty:
         viewer.add_tracks(
             tracks_array(ineligible_df),

@@ -26,7 +26,7 @@ dependencies = [
     "motile-tracker",
     "geff",
     "funtracks==2.0.2",
-    "scikit-image",
+    "scikit-image>=0.26,<0.28",   # binary_dilation is removed in 0.28 (see TODO.md)
     "scipy",
     "pandas",
     "networkx",
@@ -34,4 +34,11 @@ dependencies = [
     "imageio",
     "Pillow",
     "ome-zarr",
+    "dask",
+    "traccuracy>=0.4.3,<0.5",
+    "trackpy",
+    "filterpy",
 ]
+
+[project.optional-dependencies]
+test = ["pytest"]

@@ -15,8 +15,8 @@ This reproduces the TRACKING configuration from run 20260916_105301_9452:
     max_children           = 1
 
 Detection is set to threshold 0.00017 because the reference run consumed
-blobs_0_00017.csv. The remaining detection settings are those currently in
-preprocess_blob_det.py.
+blobs_0_00017.csv. The remaining detection settings are in DETECTION_PARAMS below
+(the detection, flow and tracking steps live in src/TrainTracks/).
 
 Usage:
     python batch_pipeline.py /path/to/folder_of_zarr_movies
@@ -44,8 +44,10 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import shutil
 import sys
+import time
 import traceback
 import uuid
 from datetime import datetime
@@ -53,23 +55,21 @@ from pathlib import Path
 
 import cv2
 import geff
-import motile
-import motile.constraints
-import motile.costs
-import networkx as nx
 import numpy as np
-import pandas as pd
-import scipy.spatial
-import skimage.measure
 import zarr
-from dask import compute, delayed
-from dask.diagnostics import ProgressBar
-from scipy import ndimage as ndi
-from scipy.ndimage import median_filter
-from skimage import filters, morphology
-from skimage.feature import blob_log
-from skimage.morphology import binary_dilation, disk
-from skimage.exposure import equalize_adapthist
+from TrainTracks.config import load_paths, to_relative
+from TrainTracks.detection import run_detection
+from TrainTracks.flow import compute_optical_flow, write_flow_zarr
+from TrainTracks.parallel import run_jobs, shard, shard_from_env
+from TrainTracks.resources import peak_rss_gb, resolve_resources
+from TrainTracks.tracking import (
+    annotate_solution_track_ids, run_tracking, solution_to_track_df, track_metrics,
+)
+from TrainTracks.scoring import (
+    COMPOSITE_WEIGHTS, MIN_EDGES_FOR_STATS, MIN_SPAN_FOR_SCORE, MIN_SPAN_KEEP,
+    PAUSE_SPEED_PX_PER_FRAME, TURN_FLAG_RADIANS,
+    make_flow_sampler, score_all, write_clean_geff,
+)
 
 
 # ============================================================================
@@ -176,200 +176,9 @@ def resolve_movie_dirs(input_dir: Path) -> list[Path]:
 # ============================================================================
 
 
-def preprocess_stack(
-    img_stack: np.ndarray,
-    blob_channel: int,
-    mask_channel: int,
-    median_filter_size: int,
-    min_object_size: int,
-    dilation_radius: int,
-    apply_mask: bool,
-) -> np.ndarray:
-    if img_stack.ndim != 4:
-        raise ValueError(f"Expected (T,C,Y,X); got {img_stack.shape}")
-    if blob_channel >= img_stack.shape[1]:
-        raise ValueError(
-            f"blob_channel={blob_channel} but image has {img_stack.shape[1]} channels"
-        )
-
-    mean_proj = np.mean(img_stack[:, blob_channel], axis=0)
-    background = median_filter(mean_proj, size=median_filter_size)
-
-    preprocessed = np.stack([
-        np.clip(frame - background, 0, None).astype(np.uint16)
-        for frame in img_stack[:, blob_channel]
-    ])
-
-    if apply_mask:
-        if mask_channel >= img_stack.shape[1]:
-            raise ValueError(
-                f"mask_channel={mask_channel} but image has {img_stack.shape[1]} channels"
-            )
-        ch_mask_proj = np.max(img_stack[:, mask_channel], axis=0)
-        thresh = filters.threshold_otsu(ch_mask_proj)
-        binary = ch_mask_proj > thresh
-        filled = ndi.binary_fill_holes(binary)
-        large = morphology.remove_small_objects(
-            filled, min_size=min_object_size
-        )
-        dilated = morphology.binary_dilation(
-            large, disk(dilation_radius)
-        )
-        preprocessed *= dilated.astype(np.uint16)
-
-    return preprocessed
-
-
-def detect_blobs_in_stack(
-    image_stack: np.ndarray,
-    threshold: float,
-    min_sigma: float,
-    max_sigma: float,
-    gaussian_sigma: float,
-    normalize: bool,
-    use_gaussian_blur: bool,
-) -> pd.DataFrame:
-    @delayed
-    def process_frame(t, frame):
-        work = frame
-        if normalize:
-            work = (work - np.min(work)) / (
-                np.max(work) - np.min(work) + 1e-8
-            )
-        if use_gaussian_blur:
-            work = filters.gaussian(work, sigma=gaussian_sigma)
-        blobs = blob_log(
-            work,
-            min_sigma=min_sigma,
-            max_sigma=max_sigma,
-            threshold=threshold,
-        )
-        return [
-            {
-                "frame": t,
-                "x": x,
-                "y": y,
-                "size": sigma * np.sqrt(2),
-            }
-            for y, x, sigma in blobs
-        ]
-
-    tasks = [process_frame(t, frame) for t, frame in enumerate(image_stack)]
-    with ProgressBar():
-        results = compute(*tasks)
-    positions = [entry for sublist in results for entry in sublist]
-    return pd.DataFrame(positions)
-
-
-def filter_dense_blobs(
-    blob_df: pd.DataFrame,
-    bin_size: int,
-    blob_filter: int,
-) -> pd.DataFrame:
-    if len(blob_df) == 0:
-        return blob_df
-
-    rounded = blob_df.copy()
-    rounded["x_rounded"] = (rounded["x"] // bin_size * bin_size).astype(int)
-    rounded["y_rounded"] = (rounded["y"] // bin_size * bin_size).astype(int)
-
-    counts = (
-        rounded.groupby(["x_rounded", "y_rounded"])
-        .size()
-        .reset_index(name="count")
-    )
-    merged = rounded.merge(counts, on=["x_rounded", "y_rounded"])
-    return merged[merged["count"] < blob_filter].reset_index(drop=True)
-
-
-def blobs_df_to_tyx(df: pd.DataFrame) -> pd.DataFrame:
-    if len(df) == 0:
-        return pd.DataFrame(columns=["t", "y", "x"], dtype=int)
-    return pd.DataFrame(
-        {
-            "t": df["frame"].astype(int),
-            "y": np.round(df["y"]).astype(int),
-            "x": np.round(df["x"]).astype(int),
-        }
-    )
-
-
 # ============================================================================
 # Optical flow
 # ============================================================================
-
-
-def compute_optical_flow(img_stack: np.ndarray, params: dict) -> np.ndarray:
-    """
-    Compute flow with shape (T-1, Y, X, 2), where flow[t] is frame t -> t+1.
-    """
-    if img_stack.ndim != 4:
-        raise ValueError(f"Expected (T,C,Y,X); got {img_stack.shape}")
-    if img_stack.shape[0] < 2:
-        raise ValueError("Need at least 2 frames to compute optical flow")
-
-    gray = img_stack[:, 0]
-    min_int_val = gray.min()
-    max_int_val = gray.max()
-    denom = max_int_val - min_int_val
-    if denom == 0:
-        arr_norm = np.zeros_like(gray, dtype=np.uint8)
-    else:
-        arr_norm = (
-            (gray - min_int_val) / denom * 255
-        ).astype(np.uint8)
-
-    kernel_size = list(params["kernel_size"])
-    clip_limit = params["clip_limit"]
-    prev = equalize_adapthist(
-        arr_norm[0], kernel_size=kernel_size, clip_limit=clip_limit
-    )
-    prev = (prev * 255).astype(np.uint8)
-
-    T, Y, X = arr_norm.shape
-    flow = np.zeros((T - 1, Y, X, 2), dtype=np.float32)
-    prev_flow = None
-
-    for i in range(1, T):
-        curr = equalize_adapthist(
-            arr_norm[i], kernel_size=kernel_size, clip_limit=clip_limit
-        )
-        curr = (curr * 255).astype(np.uint8)
-
-        current_flow = cv2.calcOpticalFlowFarneback(
-            prev,
-            curr,
-            None,
-            pyr_scale=params["pyr_scale"],
-            levels=params["levels"],
-            winsize=params["winsize"],
-            iterations=params["iterations"],
-            poly_n=params["poly_n"],
-            poly_sigma=params["poly_sigma"],
-            flags=params["flags"],
-        )
-
-        sigma = params["temporal_smoothing_sigma"]
-        if prev_flow is not None:
-            current_flow = sigma * current_flow + (1.0 - sigma) * prev_flow
-
-        flow[i - 1] = current_flow.astype(np.float32)
-        prev = curr
-        prev_flow = current_flow
-
-    return flow
-
-
-def write_flow_zarr(flow: np.ndarray, path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    root = zarr.open_group(path, mode="w")
-    arr = root.create_array(
-        "flow_raw",
-        shape=flow.shape,
-        dtype=np.float32,
-        chunks=(1, flow.shape[1], flow.shape[2], 2),
-    )
-    arr[:] = flow
 
 
 # ============================================================================
@@ -377,240 +186,14 @@ def write_flow_zarr(flow: np.ndarray, path: Path) -> None:
 # ============================================================================
 
 
-def build_candidate_graph(
-    blobs_np: np.ndarray,
-    flow_arr: np.ndarray,
-    dilation_radius: int,
-    n_frames: int,
-) -> nx.DiGraph:
-    """
-    blobs (t,y,x) + flow (T-1,Y,X,2) -> candidate DiGraph.
-
-    The final image frame has no outgoing flow by definition, so the final
-    frame's node flow attribute is set to (0,0). This keeps all T image frames
-    represented while preserving the correct flow convention: flow[t] is t->t+1.
-    """
-    if flow_arr.ndim != 4 or flow_arr.shape[-1] != 2:
-        raise ValueError(f"Expected flow shape (T-1,Y,X,2); got {flow_arr.shape}")
-    if n_frames != flow_arr.shape[0] + 1:
-        raise ValueError(
-            f"n_frames={n_frames} inconsistent with flow length {flow_arr.shape[0]}"
-        )
-
-    Y, X = flow_arr.shape[1], flow_arr.shape[2]
-    mask = np.zeros((n_frames, Y, X), dtype=np.uint16)
-
-    if len(blobs_np):
-        if np.any(blobs_np[:, 0] < 0) or np.any(blobs_np[:, 0] >= n_frames):
-            raise ValueError("Blob frame index out of bounds")
-        if np.any(blobs_np[:, 1] < 0) or np.any(blobs_np[:, 1] >= Y):
-            raise ValueError("Blob y index out of bounds")
-        if np.any(blobs_np[:, 2] < 0) or np.any(blobs_np[:, 2] >= X):
-            raise ValueError("Blob x index out of bounds")
-        mask[blobs_np[:, 0], blobs_np[:, 1], blobs_np[:, 2]] = True
-
-    dilated = np.zeros(mask.shape, dtype=np.uint16)
-    footprint = disk(dilation_radius)
-    for frame in range(n_frames):
-        dilated[frame] = binary_dilation(mask[frame], footprint=footprint)
-
-    cand_graph = nx.DiGraph()
-    last_node_id = 0
-
-    for frame in range(n_frames):
-        segmentation = skimage.measure.label(dilated[frame])
-        props = skimage.measure.regionprops(segmentation)
-
-        # Only frames that can be a source for an outgoing edge have actual flow.
-        flow_frame = flow_arr[frame] if frame < flow_arr.shape[0] else None
-
-        for regionprop in props:
-            node_id = int(regionprop.label) + last_node_id
-            region = segmentation == regionprop.label
-            centroid = (
-                float(regionprop.centroid[0]),
-                float(regionprop.centroid[1]),
-            )
-
-            if flow_frame is None:
-                flow_vec = (0.0, 0.0)
-            else:
-                flow_vec = (
-                    float(np.mean(flow_frame[region][..., 1])),
-                    float(np.mean(flow_frame[region][..., 0])),
-                )
-
-            cand_graph.add_node(
-                node_id,
-                t=frame,
-                x=centroid[1],
-                y=centroid[0],
-                flow=flow_vec,
-            )
-
-        # Advance the global offset only after this frame's nodes are created.
-        last_node_id += len(props)
-
-    if cand_graph.number_of_nodes() != len(cand_graph.nodes):
-        raise RuntimeError("Candidate graph node count is internally inconsistent")
-
-    return cand_graph
-
-
-def _compute_node_frame_dict(cand_graph: nx.DiGraph) -> dict[int, list[int]]:
-    frame_dict: dict[int, list[int]] = {}
-    for node, data in cand_graph.nodes(data=True):
-        frame_dict.setdefault(data["t"], []).append(node)
-    return frame_dict
-
-
-def _create_kdtree(cand_graph: nx.DiGraph, node_ids: list[int]) -> scipy.spatial.KDTree:
-    positions = [[cand_graph.nodes[n]["x"], cand_graph.nodes[n]["y"]] for n in node_ids]
-    return scipy.spatial.KDTree(positions)
-
-
-def add_candidate_edges(
-    cand_graph: nx.DiGraph,
-    max_edge_distance: float,
-    max_gap: int,
-) -> None:
-    node_frame_dict = _compute_node_frame_dict(cand_graph)
-    frames = sorted(node_frame_dict.keys())
-    if not frames:
-        return
-
-    kdtrees = {
-        f: _create_kdtree(cand_graph, node_frame_dict[f])
-        for f in frames
-        if node_frame_dict[f]
-    }
-
-    for frame in frames:
-        src_ids = node_frame_dict[frame]
-        if not src_ids:
-            continue
-        src_tree = kdtrees[frame]
-
-        for gap in range(1, max_gap + 1):
-            target = frame + gap
-            if target not in node_frame_dict:
-                continue
-            tgt_ids = node_frame_dict[target]
-            if not tgt_ids:
-                continue
-            tgt_tree = kdtrees[target]
-            matched = src_tree.query_ball_tree(
-                tgt_tree, max_edge_distance * gap
-            )
-            for src_id, tgt_idxs in zip(src_ids, matched):
-                for j in tgt_idxs:
-                    cand_graph.add_edge(src_id, tgt_ids[j], gap=gap)
-
-
-def add_flow_dist_attr(cand_graph: nx.DiGraph, gap_penalty: float) -> None:
-    for u, v in cand_graph.edges:
-        node_u = cand_graph.nodes[u]
-        node_v = cand_graph.nodes[v]
-        gap = cand_graph.edges[u, v].get("gap", 1)
-        pos_u = np.array([node_u["y"], node_u["x"]])
-        pos_v = np.array([node_v["y"], node_v["x"]])
-        predicted = pos_u + np.array(node_u["flow"]) * gap
-        base = float(np.linalg.norm(predicted - pos_v))
-        cand_graph.edges[u, v]["flow_offset"] = (
-            base + gap_penalty * (gap - 1)
-        )
-
-
-def solve_tracks(cand_graph: nx.DiGraph, params: dict) -> nx.DiGraph:
-    if cand_graph.number_of_nodes() == 0:
-        return nx.DiGraph()
-
-    cand_trackgraph = motile.TrackGraph(cand_graph, frame_attribute="t")
-    add_flow_dist_attr(cand_trackgraph, params["gap_penalty"])
-
-    solver = motile.Solver(cand_trackgraph)
-    solver.add_cost(
-        motile.costs.NodeSelectedCost(
-            weight=params["node_selected_weight"]
-        )
-    )
-    solver.add_cost(
-        motile.costs.EdgeSelectedCost(
-            weight=params["edge_selected_weight"],
-            attribute=params["edge_flow_attribute"],
-            constant=params["edge_selected_constant"],
-        )
-    )
-    solver.add_cost(
-        motile.costs.NodeAppearCost(
-            constant=params["node_appear_constant"]
-        )
-    )
-    solver.add_constraint(
-        motile.constraints.MaxParents(params["max_parents"])
-    )
-    solver.add_constraint(
-        motile.constraints.MaxChildren(params["max_children"])
-    )
-    solver.solve()
-    return solver.get_selected_subgraph().to_nx_graph()
-
-
 # ============================================================================
 # Metrics
 # ============================================================================
 
 
-def track_metrics(solution_nx: nx.DiGraph, long_min_frames: int) -> dict:
-    n_nodes = solution_nx.number_of_nodes()
-    n_edges = solution_nx.number_of_edges()
-    components = list(nx.weakly_connected_components(solution_nx))
-    n_tracks = len(components)
-
-    if n_tracks == 0:
-        return {
-            "n_detections_tracked": 0,
-            "n_edges": 0,
-            "n_tracks": 0,
-            "mean_track_len": 0.0,
-            "median_track_len": 0.0,
-            "max_track_len": 0,
-            "n_long_tracks": 0,
-            "frac_nodes_in_long": 0.0,
-            "tracks_per_detection": 0.0,
-            "n_skip_edges": 0,
-            "frac_skip_edges": 0.0,
-        }
-
-    lengths = []
-    nodes_in_long = 0
-    for comp in components:
-        frames = [solution_nx.nodes[n]["t"] for n in comp]
-        span = max(frames) - min(frames) + 1
-        lengths.append(span)
-        if span >= long_min_frames:
-            nodes_in_long += len(comp)
-
-    lengths = np.asarray(lengths)
-    n_skip = sum(
-        1
-        for u, v in solution_nx.edges
-        if abs(solution_nx.nodes[v]["t"] - solution_nx.nodes[u]["t"]) > 1
-    )
-
-    return {
-        "n_detections_tracked": int(n_nodes),
-        "n_edges": int(n_edges),
-        "n_tracks": int(n_tracks),
-        "mean_track_len": float(np.mean(lengths)),
-        "median_track_len": float(np.median(lengths)),
-        "max_track_len": int(np.max(lengths)),
-        "n_long_tracks": int(np.sum(lengths >= long_min_frames)),
-        "frac_nodes_in_long": float(nodes_in_long / n_nodes),
-        "tracks_per_detection": float(n_tracks / n_nodes),
-        "n_skip_edges": int(n_skip),
-        "frac_skip_edges": float(n_skip / n_edges) if n_edges else 0.0,
-    }
+# ============================================================================
+# Post-hoc flow scoring / filtering
+# ============================================================================
 
 
 # ============================================================================
@@ -618,22 +201,59 @@ def track_metrics(solution_nx: nx.DiGraph, long_min_frames: int) -> dict:
 # ============================================================================
 
 
-def process_movie(movie_path: Path, output_root: Path, overwrite: bool) -> dict:
-    movie_id = movie_path.name[:-5] if movie_path.name.endswith(".zarr") else movie_path.stem
-    run_id = make_run_id()
-    movie_out = output_root / movie_id
+class _Stopwatch:
+    """Seconds spent in each stage of one movie (recorded in metadata.json)."""
 
-    if movie_out.exists():
-        if not overwrite:
+    def __init__(self) -> None:
+        self.t = time.perf_counter()
+        self.laps: dict[str, float] = {}
+
+    def lap(self, name: str) -> None:
+        now = time.perf_counter()
+        self.laps[name] = round(now - self.t, 2)
+        self.t = now
+
+
+def movie_id_of(movie_path: Path) -> str:
+    return movie_path.name[:-5] if movie_path.name.endswith(".zarr") else movie_path.stem
+
+
+def process_movie(
+    movie_path: Path, output_root: Path, overwrite: bool, skip_existing: bool = False
+) -> dict:
+    """Run the full pipeline on one movie.
+
+    Everything is written to ``<movie>.partial`` and renamed to ``<movie>`` only when the movie is
+    complete, so an interrupted job (crash, killed cluster task) never leaves a half-written movie
+    folder, and with ``overwrite`` the old output survives until the new one is finished.
+    ``skip_existing`` returns the stored metadata of an already complete movie.
+    """
+    movie_id = movie_id_of(movie_path)
+    run_id = make_run_id()
+    final_out = output_root / movie_id
+    movie_out = output_root / f"{movie_id}.partial"
+    sw = _Stopwatch()
+    t_start = time.perf_counter()
+
+    if final_out.exists():
+        complete = (final_out / "metadata.json").exists()
+        if skip_existing and complete:
+            print(f"Skipping {movie_id}: complete output already exists")
+            return json.loads((final_out / "metadata.json").read_text())
+        if not (overwrite or (skip_existing and not complete)):
             raise FileExistsError(
-                f"Output already exists: {movie_out}. Use --overwrite to replace it."
+                f"Output already exists: {final_out}. Use --overwrite to replace it "
+                "(or --skip-existing to resume)."
             )
-        shutil.rmtree(movie_out)
+    if movie_out.exists():
+        shutil.rmtree(movie_out)  # leftover from an interrupted run
     movie_out.mkdir(parents=True, exist_ok=True)
 
     blobs_csv = movie_out / "blobs.csv"
     flow_zarr = movie_out / "flow.zarr"
     tracks_geff = movie_out / "tracks.geff"
+    flow_scores_csv = movie_out / "flow_scores.csv"
+    tracks_clean_geff = movie_out / "tracks_clean.geff"
     metadata_json = movie_out / "metadata.json"
 
     started = now_iso()
@@ -651,61 +271,29 @@ def process_movie(movie_path: Path, output_root: Path, overwrite: bool) -> dict:
 
     T, C, Y, X = img_stack.shape
     print(f"Image shape: {img_stack.shape}, dtype={img_stack.dtype}")
+    sw.lap("load_s")
 
     # Detection
     print(f"Detecting blobs (threshold={DETECTION_PARAMS['threshold']})...")
-    pre = preprocess_stack(
-        img_stack,
-        blob_channel=DETECTION_PARAMS["blob_channel"],
-        mask_channel=DETECTION_PARAMS["mask_channel"],
-        median_filter_size=DETECTION_PARAMS["median_filter_size"],
-        min_object_size=DETECTION_PARAMS["min_object_size"],
-        dilation_radius=DETECTION_PARAMS["mask_dilation_radius"],
-        apply_mask=DETECTION_PARAMS["apply_mask"],
-    )
-    raw_blobs = detect_blobs_in_stack(
-        pre,
-        threshold=DETECTION_PARAMS["threshold"],
-        min_sigma=DETECTION_PARAMS["min_sigma"],
-        max_sigma=DETECTION_PARAMS["max_sigma"],
-        gaussian_sigma=DETECTION_PARAMS["gaussian_sigma"],
-        normalize=DETECTION_PARAMS["normalize"],
-        use_gaussian_blur=DETECTION_PARAMS["use_gaussian_blur"],
-    )
-    filtered_blobs = filter_dense_blobs(
-        raw_blobs,
-        bin_size=DETECTION_PARAMS["bin_size"],
-        blob_filter=DETECTION_PARAMS["blob_filter"],
-    )
-    blobs_df = blobs_df_to_tyx(filtered_blobs)
+    raw_blobs, blobs_df = run_detection(img_stack, DETECTION_PARAMS)
     blobs_df.to_csv(blobs_csv, index=False)
     print(f"Blobs: {len(raw_blobs)} raw -> {len(blobs_df)} after density filter")
+    sw.lap("detection_s")
 
     # Flow
     print("Computing optical flow...")
     flow_raw = compute_optical_flow(img_stack, FLOW_PARAMS)
     write_flow_zarr(flow_raw, flow_zarr)
     print(f"Flow shape: {flow_raw.shape} (explicitly T-1 transitions)")
+    sw.lap("flow_s")
 
     # Candidate graph and solve
-    blobs_np = blobs_df[["t", "y", "x"]].to_numpy(dtype=np.int64)
-    cand = build_candidate_graph(
-        blobs_np,
-        flow_raw,
-        dilation_radius=TRACKING_PARAMS["dilation_radius"],
-        n_frames=T,
-    )
-    add_candidate_edges(
-        cand,
-        max_edge_distance=TRACKING_PARAMS["max_edge_distance"],
-        max_gap=TRACKING_PARAMS["max_gap"],
-    )
+    solution_nx, cand_stats = run_tracking(blobs_df, flow_raw, T, TRACKING_PARAMS)
     print(
-        f"Candidate graph: {cand.number_of_nodes()} nodes, "
-        f"{cand.number_of_edges()} edges"
+        f"Candidate graph: {cand_stats['n_candidate_nodes']} nodes, "
+        f"{cand_stats['n_candidate_edges']} edges"
     )
-
-    solution_nx = solve_tracks(cand, TRACKING_PARAMS)
+    sw.lap("tracking_s")
     metrics = track_metrics(solution_nx, LONG_TRACK_MIN_FRAMES)
 
     print(
@@ -719,22 +307,64 @@ def process_movie(movie_path: Path, output_root: Path, overwrite: bool) -> dict:
     )
 
     if solution_nx.number_of_nodes() > 0:
+        annotate_solution_track_ids(solution_nx)
         geff.write(solution_nx, str(tracks_geff), zarr_format=3, overwrite=True)
     else:
         print("Warning: empty solution; no tracks.geff written")
 
+    sw.lap("write_tracks_s")
+
+    # Post-hoc flow scoring + filtering. Keep the raw solver GEFF untouched.
+    posthoc = {
+        "n_flagged_tracks": 0,
+        "n_short_tracks": 0,
+        "n_tracks_removed": 0,
+        "n_tracks_kept": 0,
+        "n_detections_kept": 0,
+    }
+    if solution_nx.number_of_nodes() > 0:
+        print("Running post-hoc flow scoring / track filtering...")
+        track_df = solution_to_track_df(solution_nx)
+        flow_vec = make_flow_sampler(flow_raw)
+        feats = score_all(track_df, flow_vec)
+        feats.to_csv(flow_scores_csv)
+        print(f"Wrote flow scores: {flow_scores_csv}")
+
+        clean = write_clean_geff(track_df, feats, tracks_clean_geff)
+        posthoc = {
+            "n_flagged_tracks": clean["n_flagged_removed"],
+            "n_short_tracks": clean["n_short_removed"],
+            "n_tracks_removed": clean["n_tracks_removed"],
+            "n_tracks_kept": clean["n_clean_tracks"],
+            "n_detections_kept": clean["n_clean_detections"],
+        }
+        print(
+            f"Post-hoc filter: flagged={posthoc['n_flagged_tracks']} | "
+            f"short={posthoc['n_short_tracks']} | "
+            f"removed={posthoc['n_tracks_removed']} | "
+            f"kept={posthoc['n_tracks_kept']}"
+        )
+    else:
+        print("Skipping post-hoc filtering for empty solution")
+
+    sw.lap("scoring_s")
     record = {
         "run_id": run_id,
         "reference_run_id": REFERENCE_RUN_ID,
         "reference_run_note": REFERENCE_RUN_NOTE,
         "timestamp_start": started,
         "timestamp_end": now_iso(),
-        "input_zarr": str(movie_path),
+        # Paths are stored relative (input_zarr: file name under raw_root; output_*: relative to
+        # the results root) so moving/renaming a folder cannot leave stale absolute paths.
+        "path_schema": "relative-v1",
+        "input_zarr": movie_path.name,
         "zarr_array_key": ZARR_ARRAY_KEY,
-        "output_dir": str(movie_out),
-        "output_blobs_csv": str(blobs_csv),
-        "output_flow_zarr": str(flow_zarr),
-        "output_geff": str(tracks_geff),
+        "output_dir": to_relative(final_out, output_root),
+        "output_blobs_csv": to_relative(final_out / blobs_csv.name, output_root),
+        "output_flow_zarr": to_relative(final_out / flow_zarr.name, output_root),
+        "output_geff": to_relative(final_out / tracks_geff.name, output_root),
+        "output_flow_scores_csv": to_relative(final_out / flow_scores_csv.name, output_root),
+        "output_clean_geff": to_relative(final_out / tracks_clean_geff.name, output_root),
         "image_shape": list(img_stack.shape),
         "n_blobs_raw": int(len(raw_blobs)),
         "n_blobs_input": int(len(blobs_df)),
@@ -743,9 +373,34 @@ def process_movie(movie_path: Path, output_root: Path, overwrite: bool) -> dict:
         "detection_params": DETECTION_PARAMS,
         "flow_params": FLOW_PARAMS,
         "tracking_params": TRACKING_PARAMS,
+        "posthoc_params": {
+            "min_span_for_score": MIN_SPAN_FOR_SCORE,
+            "min_span_keep": MIN_SPAN_KEEP,
+            "min_edges_for_stats": MIN_EDGES_FOR_STATS,
+            "turn_flag_radians": TURN_FLAG_RADIANS,
+            "composite_weights": COMPOSITE_WEIGHTS,
+            "pause_speed_px_per_frame": PAUSE_SPEED_PX_PER_FRAME,
+            "turn_definition": "mean |signed turn| between consecutive moving steps; "
+                                 "steps <= pause_speed_px_per_frame are neutral "
+                                 "(TrainTracks.scoring)",
+        },
+        "posthoc_results": posthoc,
+        # where the time and memory went (all seconds; tracking_* split from the solver stats)
+        "timings_seconds": {
+            **sw.laps,
+            "tracking_graph_s": cand_stats["seconds_graph"],
+            "tracking_edges_s": cand_stats["seconds_edges"],
+            "tracking_solve_s": cand_stats["seconds_solve"],
+            "total_s": round(time.perf_counter() - t_start, 2),
+        },
+        "peak_rss_gb": peak_rss_gb(),
     }
     write_json(metadata_json, record)
-    print(f"Wrote: {metadata_json}")
+    # Complete: swap the finished folder into place (the old one, if any, is removed only now).
+    if final_out.exists():
+        shutil.rmtree(final_out)
+    os.replace(movie_out, final_out)
+    print(f"Wrote: {final_out / 'metadata.json'}")
     return record
 
 
@@ -772,78 +427,170 @@ def write_summary(records: list[dict], path: Path) -> None:
         "n_skip_edges",
         "frac_skip_edges",
         "output_geff",
+        "output_clean_geff",
+        "n_flagged_tracks",
+        "n_short_tracks",
+        "n_tracks_removed",
+        "n_tracks_kept",
+        "n_detections_kept",
     ]
+    # The post-hoc counts are stored under "posthoc_results"; lift them to the top level so they
+    # reach the columns above (they were silently blank before).
+    rows = [{**rec, **rec.get("posthoc_results", {})} for rec in records]
     with path.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")
         writer.writeheader()
-        writer.writerows(records)
+        writer.writerows(rows)
+
+
+def _movie_job(job: dict) -> dict:
+    """Worker entry point (module level so a spawn-based process pool can import it)."""
+    return process_movie(
+        Path(job["movie_path"]), Path(job["output_root"]), job["overwrite"], job["skip_existing"]
+    )
+
+
+def _records_from_metadata(output_dir: Path) -> list[dict]:
+    return [json.loads(p.read_text()) for p in sorted(output_dir.glob("*/metadata.json"))]
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Run the validated tracking configuration over a folder of Zarr movies."
+        description="Run the validated tracking configuration over a folder of Zarr movies.",
+        epilog="Parallelism: --jobs N runs N movies at once in a local process pool; on a SLURM "
+        "job array each array task takes its share of the movies automatically "
+        "(or pass --task-index / --num-tasks). See docs/parallel_and_hpc.md.",
     )
     parser.add_argument(
         "input_dir",
         type=Path,
-        help="Folder containing *.zarr movie directories",
+        nargs="?",
+        default=None,
+        help="Folder containing *.zarr movie directories (default: raw_root from the config)",
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
         default=None,
-        help="Output root (default: <input_dir>/tracking_batch)",
+        help="Output root (default: results_root from the config, else <input_dir>/tracking_batch)",
     )
+    parser.add_argument("--movie", action="append", help="Movie id to run; repeat for several (default: all)")
     parser.add_argument(
         "--overwrite",
         action="store_true",
         help="Replace an existing per-movie output directory",
     )
     parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="Skip movies whose output is already complete (resume an interrupted batch)",
+    )
+    parser.add_argument(
         "--stop-on-error",
         action="store_true",
         help="Stop the batch at the first failed movie",
     )
+    parser.add_argument("--jobs", default=None, help="Movies to run at once: an integer or 'auto' (default: auto)")
+    parser.add_argument("--threads-per-job", type=int, default=None, help="Cap on threads used by each movie")
+    parser.add_argument("--profile", default=None, help="Resource profile from TrainTracks.toml ([profiles.NAME])")
+    parser.add_argument("--task-index", type=int, default=None, help="This task's shard index (cluster job arrays)")
+    parser.add_argument("--num-tasks", type=int, default=None, help="Total number of shards (cluster job arrays)")
+    parser.add_argument("--log-dir", type=Path, default=None, help="Per-movie logs when --jobs > 1 (default: <output>/logs)")
+    parser.add_argument(
+        "--summarize-only",
+        action="store_true",
+        help="Do not run anything; rebuild batch_summary.csv from the metadata.json files in the output folder",
+    )
     args = parser.parse_args()
 
-    input_dir = args.input_dir.expanduser().resolve()
+    cfg = load_paths(require=False)
+    if args.input_dir is not None:
+        input_dir = args.input_dir.expanduser().resolve()
+    elif cfg is not None:
+        input_dir = cfg.raw_root
+    else:
+        parser.error("input_dir not given and raw_root is not configured (see TrainTracks.example.toml)")
     if not input_dir.is_dir():
         parser.error(f"Input directory not found: {input_dir}")
 
-    output_dir = (
-        args.output_dir.expanduser().resolve()
-        if args.output_dir is not None
-        else input_dir / "tracking_batch"
-    )
+    if args.output_dir is not None:
+        output_dir = args.output_dir.expanduser().resolve()
+    elif cfg is not None:
+        output_dir = cfg.results_root
+    else:
+        output_dir = input_dir / "tracking_batch"
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    summary_csv = output_dir / "batch_summary.csv"
+    if args.summarize_only:
+        records = _records_from_metadata(output_dir)
+        if not records:
+            parser.error(f"no <movie>/metadata.json found in {output_dir}")
+        write_summary(records, summary_csv)
+        print(f"Wrote batch summary for {len(records)} movies: {summary_csv}")
+        return 0
+
     movies = resolve_movie_dirs(input_dir)
-    print(f"Found {len(movies)} Zarr movies")
+    if args.movie:
+        wanted = set(args.movie)
+        unknown = wanted - {movie_id_of(m) for m in movies}
+        if unknown:
+            parser.error(f"unknown movie id(s): {sorted(unknown)}")
+        movies = [m for m in movies if movie_id_of(m) in wanted]
+    if args.num_tasks is not None:
+        index, count = (args.task_index or 0), args.num_tasks
+    else:
+        index, count = shard_from_env()
+    if count > 1:
+        movies = shard(movies, index, count)
+    if not movies:
+        parser.error("no movies to run")
+
+    res = resolve_resources(profile=args.profile, jobs=args.jobs, threads_per_job=args.threads_per_job)
+    jobs = min(res.jobs, len(movies))
+    print(f"Found {len(movies)} Zarr movies" + (f" (shard {index + 1}/{count})" if count > 1 else ""))
     print(f"Output root: {output_dir}")
+    print(f"Resources: {jobs} movie(s) at once, {res.threads_per_job} thread(s) each")
     print(f"Reference tracking run: {REFERENCE_RUN_ID}")
     print(json.dumps(json_safe(TRACKING_PARAMS), indent=2))
     print(f"Detection threshold: {DETECTION_PARAMS['threshold']}")
 
-    records = []
-    failures = []
+    job_list = [
+        {"id": movie_id_of(m), "movie_path": str(m), "output_root": str(output_dir),
+         "overwrite": args.overwrite, "skip_existing": args.skip_existing}
+        for m in movies
+    ]
 
-    for movie in movies:
-        try:
-            records.append(process_movie(movie, output_dir, args.overwrite))
-        except Exception as exc:
-            print(f"\nFAILED: {movie.name}: {exc}", file=sys.stderr)
-            traceback.print_exc()
-            failures.append({"input_zarr": str(movie), "error": str(exc)})
-            if args.stop_on_error:
-                break
+    def on_done(r, n_done, n_total):
+        status = "ok" if r.ok else f"FAILED ({r.error})"
+        print(f"[{n_done}/{n_total}] {r.item['id']}: {status} in {r.seconds:.0f}s", flush=True)
 
-    summary_csv = output_dir / "batch_summary.csv"
+    results = run_jobs(
+        _movie_job,
+        job_list,
+        jobs=jobs,
+        threads_per_job=res.threads_per_job,
+        log_dir=(args.log_dir or output_dir / "logs") if jobs > 1 else None,
+        name_of=lambda j: j["id"],
+        stop_on_error=args.stop_on_error,
+        on_done=on_done,
+    )
+    records = [r.value for r in results if r.ok]
+    failures = [{"input_zarr": r.item["movie_path"], "error": r.error} for r in results if not r.ok]
+    for r in results:
+        if not r.ok:
+            print(f"\nFAILED: {r.item['id']}: {r.error}", file=sys.stderr)
+            print(r.traceback, file=sys.stderr)
+
+    suffix = f".shard{index}of{count}" if count > 1 else ""  # shards must not overwrite each other
     if records:
-        write_summary(records, summary_csv)
-        print(f"\nWrote batch summary: {summary_csv}")
+        shard_summary = output_dir / f"batch_summary{suffix}.csv"
+        write_summary(records, shard_summary)
+        print(f"\nWrote batch summary: {shard_summary}"
+              + ("  (combine with --summarize-only after all shards finish)" if count > 1 else ""))
 
     if failures:
-        failures_json = output_dir / "batch_failures.json"
+        failures_json = output_dir / f"batch_failures{suffix}.json"
         write_json(failures_json, failures)
         print(f"Wrote failure log: {failures_json}", file=sys.stderr)
 
