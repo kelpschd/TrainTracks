@@ -28,7 +28,7 @@ listing of the folder, the READMEs, TODO.md, git history and script headers.
 ```
 TrainTracks/
   README.md              run order, environment, data locations
-  pyproject.toml, environment.yml (+ lock file)
+  pyproject.toml (+ requirements-lock.txt)
   CLEANUP_PLAN.md -> delete when done
   src/TrainTracks/       shared, importable code (no hard-coded paths)
     io.py                geff_to_track_df, track_df_to_nx, uid helpers
@@ -54,7 +54,7 @@ TrainTracks/
 ```
 
 ## Status
-Update 2026-11-20: fresh run into DS/results done and verified against the archive (pipeline, traccuracy, organelle, coloc, cotracking summaries). README rewritten (run order, settings, checks, layout). Environment: `environment.yml`, `requirements-lock.txt` (full freeze) and the missing dependencies (traccuracy, dask, matplotlib, trackpy, filterpy) added to `pyproject.toml` on 2026-11-20. Remaining: `--jobs` for puncta/cotracking, analysis qmd paths (user will do later), kymograph analysis (user), `notebooks/` is kept (user may use it later); `cotracking/cotracking_section.qmd` removed (redundant); `--jobs` for puncta/cotracking deferred by the user.
+Update 2026-11-20: fresh run into DS/results done and verified against the archive (pipeline, traccuracy, organelle, coloc, cotracking summaries). README rewritten (run order, settings, checks, layout). Environment: `requirements-lock.txt` (full freeze; `environment.yml` was dropped, `pyproject.toml` declares the dependencies) and the missing dependencies (traccuracy, dask, matplotlib, trackpy, filterpy) added to `pyproject.toml` on 2026-11-20. Remaining: `--jobs` for puncta/cotracking, analysis qmd paths (user will do later), kymograph analysis (user), `notebooks/` is kept (user may use it later); `cotracking/cotracking_section.qmd` removed (redundant); `--jobs` for puncta/cotracking deferred by the user.
 Phase 0, 1, 2 done (2026-11-19). Phase 3 in progress:
 - 3.1 done: `src/TrainTracks/ids.py` and `tracks_io.py` replace 5 copies of
   `geff_to_track_df` and 3 of the uid helpers (behaviour-identical; see tests/).
@@ -135,7 +135,7 @@ Candidate speed-ups to profile first: building the candidate graph makes a full-
 region (a bit-identical rewrite from region coordinates is likely much faster).
 
 **Phase 4 - Reproducibility.**
-`environment.yml` plus a lock file with the versions listed in TODO.md, add a smoke
+`requirements-lock.txt` (a full `pip freeze`; no `environment.yml`, `pyproject.toml` is the single place for dependencies), add a smoke
 test on a tiny synthetic movie, write the real README run order, and make the
 parameters used for the paper (thresholds, bin size, gap, cutoffs) a single
 `params.yaml` that the pipeline writes into every output's metadata.
