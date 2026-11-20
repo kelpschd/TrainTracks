@@ -58,10 +58,11 @@ The commands below assume `TrainTracks.toml` is set up and `DS` points at the ex
 | 6. Pool cotracking | `python cotracking/summarize_cotracking_velocity.py "$DS/results/cotracking"` | `cotracking/summary/` tables (read by the analysis qmd; figures are made there) |
 
 Refresh `batch_summary.csv` from the per-movie metadata at any time with
-`python scripts/batch_pipeline.py --summarize-only`. Every step is resumable: `batch_pipeline.py` and
-`batch_lyso_interaction.py` accept `--skip-existing`, and the pipeline writes each movie to
-`<movie>.partial` and renames it only when complete, so a killed run never leaves a half-written movie.
-A movie folder is complete if and only if it contains `metadata.json`.
+`python scripts/batch_pipeline.py --summarize-only`. The tracking pipeline (step 1) and the organelle
+segmentation (step 3) can be resumed with `--skip-existing`. The pipeline writes each movie to
+`<movie>.partial` and renames it only when complete, so a killed run never leaves a half-written movie;
+a movie folder is complete if and only if it contains `metadata.json`. Cotracking caches its organelle
+tracks per movie, so re-running it with other settings does not redo the segmentation.
 
 Speed: step 1 sizes itself from the machine (movies at once, threads per movie; override with `--jobs`,
 `--threads-per-job` or `--profile NAME`). The full 32-movie run took about 18 minutes with 4 movies at once on a
