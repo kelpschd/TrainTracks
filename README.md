@@ -1,6 +1,6 @@
 # TrainTracks
 
-A pipeline to track single particles live-cell movies, clean the tracks automatically, and analyse 
+A pipeline to track single particles from live-cell movies, clean the tracks automatically, and analyse 
 how they interact with lysosomes and mitochondria. Raw data are multi-channel ND2 or zarr files 
 (channel 0 = puncta, 1 = lysosome, 2 = mitochondria, 3 = BFP, ignored). The pipeline detects puncta 
 on each frame, estimates optical flow across frames, links detections into tracks with an integer 
