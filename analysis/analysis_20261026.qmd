@@ -1,0 +1,1640 @@
+---
+title: "Particle tracking analysis"
+subtitle: ""
+author: "Dan Kelpsch"
+format:
+  html:
+    self-contained: true
+editor: visual
+---
+
+# Background
+
+\~\~
+
+# Load packages
+
+```{r}
+#| include: false
+#| label: Load packages
+list.of.packages <- c("tidyverse", "ggpubr", "viridis", "ggforce", "ggridges", "zoo")
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+lapply(list.of.packages, library, character.only = TRUE)
+```
+
+# Load data
+
+```{r}
+coloc <- read.csv(file="organelle_coloc_detections.csv")
+tracks <- read.csv(file = "organelle_interaction_detections.csv") %>%
+  left_join(coloc)
+
+organelle_summary <- read.csv(file = "organelle_interaction_tracks.csv") %>%
+  separate(movie,
+           into = c("guide", "well", "sample_id"),
+           sep = "_",
+           remove = FALSE) %>%
+  mutate(
+    well = as.numeric(str_remove(well, "^Well")), 
+    sample_id = as.numeric(str_remove(sample_id, "\\.nd2$"))
+  )
+
+time_intervals <- read.csv("~/Documents/DataTecnica/TTU/Data/time_intervals.csv") %>%
+  mutate(image_name = sub("\\.nd2$", "", image_name))
+
+dir.create("./Output_graphs", showWarnings = FALSE)
+
+##round_any() is a function in the package plyr, but plyr has some 
+##compatibility issues with the tidyverse, thus just writing in the 
+##function manually
+round_any = function(x, accuracy, f=round){f(x/ accuracy) * accuracy}
+```
+
+```{r}
+time_intervals <- time_intervals %>%
+  group_by(Path,image_name) %>%
+  arrange(frame) %>%
+  mutate(
+    frame_duration = Time_sec - lag(Time_sec)
+  ) %>%
+  ungroup() %>%
+  arrange(Path, image_name, frame)
+```
+
+```{r}
+valid_tracks <- left_join(tracks, 
+                          time_intervals, 
+                          by = c("movie" = "image_name",
+                                 "frame" = "frame"))
+```
+
+```{r}
+# split up filename
+valid_tracks <- valid_tracks %>%
+  separate(movie,
+           into = c("guide", "well", "sample_id"),
+           sep = "_",
+           remove = FALSE) %>%
+  mutate(
+    well = as.numeric(str_remove(well, "^Well")), 
+    sample_id = as.numeric(str_remove(sample_id, "\\.nd2$"))
+  )
+```
+
+## Annotate data
+
+Update image information for pixel sizes and apply relevant calculations for distance
+
+```{r}
+pixel_size <- 0.108333333333333
+
+valid_tracks <- valid_tracks %>%
+  group_by(particle, movie) %>%
+  arrange(frame, .by_group = TRUE) %>%
+  mutate(
+    y_um = y * pixel_size,
+    x_um = x * pixel_size, 
+    dy = y_um - lag(y_um), #change in y
+    dx = x_um - lag(x_um), #change in x
+    displacement = sqrt(dx^2 + dy^2), 
+    relative_frame = frame - first(frame),
+    instant_velocity = displacement/frame_duration
+  ) %>%
+  ungroup()
+```
+
+# Particle analysis
+
+```{r}
+ggplot(valid_tracks, 
+       aes(x = relative_frame, 
+           y = displacement, 
+           group = particle,
+           color = guide)) +
+  theme_bw() +
+  geom_line(alpha = 0.6) +
+    labs(x = "Frame (relative)",
+       y = "Particle displacement per frame (µm)") +
+  theme(
+    axis.text.x = element_text(face = 'bold'), 
+    axis.title.x = element_text(face = 'bold'),
+    axis.text.y = element_text(face = 'bold'), 
+    axis.title.y = element_text(face = 'bold'),
+    legend.title = element_text(face = 'bold'),
+    legend.text = element_text(face = 'bold'),
+    strip.text.x = element_text(face = 'bold')) +
+  facet_wrap(~well, ncol = 4)
+```
+
+## Displacement
+
+```{r}
+y_lim <- valid_tracks %>% 
+  #filter(Outlier == "Normal") %>%
+  pull(displacement) %>% 
+  max(., na.rm = TRUE) %>% 
+  round_any(., 5, ceiling)
+
+ggplot(data = valid_tracks,
+       aes(x = guide,
+           y = displacement)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = factor(well)), width = 0.2, size = 0.5) +
+  #geom_point(position = position_jitterdodge(jitter.width = 0.2)) +
+  theme_bw() +
+  scale_y_continuous(
+    labels = scales::comma, limits = c(0,y_lim), #c(lower limit, upper limit)
+    breaks = seq(0,y_lim,y_lim/10)) +  #seq(lower limit, upper limit, tick frequency)
+  labs(x = "Guide RNA",
+       y = "Displacement per frame (µm)") +
+  theme(
+    axis.text.x = element_text(face = 'bold', angle = 45, hjust = 1), 
+    axis.title.x = element_text(face = 'bold'),
+    axis.text.y = element_text(face = 'bold'), 
+    axis.title.y = element_text(face = 'bold'),
+    legend.title = element_text(face = 'bold'),
+    legend.text = element_text(face = 'bold'),
+    strip.text.x = element_text(face = 'bold'))
+
+ggplot(data = valid_tracks,
+       aes(x = lysosome_inside,
+           y = displacement)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = factor(well)), width = 0.2, size = 0.5) +
+  #geom_point(position = position_jitterdodge(jitter.width = 0.2)) +
+  theme_bw() +
+  scale_y_continuous(
+    labels = scales::comma, limits = c(0,y_lim), #c(lower limit, upper limit)
+    breaks = seq(0,y_lim,y_lim/10)) +  #seq(lower limit, upper limit, tick frequency)
+  labs(x = "Punctum within lysosome mask",
+       y = "Displacement per frame (µm)") +
+  theme(
+    axis.text.x = element_text(face = 'bold', angle = 45, hjust = 1), 
+    axis.title.x = element_text(face = 'bold'),
+    axis.text.y = element_text(face = 'bold'), 
+    axis.title.y = element_text(face = 'bold'),
+    legend.title = element_text(face = 'bold'),
+    legend.text = element_text(face = 'bold'),
+    strip.text.x = element_text(face = 'bold')) +
+  facet_grid(~guide)
+
+ggplot(data = valid_tracks,
+       aes(x = mitochondria_inside,
+           y = displacement)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = factor(well)), width = 0.2, size = 0.5) +
+  #geom_point(position = position_jitterdodge(jitter.width = 0.2)) +
+  theme_bw() +
+  scale_y_continuous(
+    labels = scales::comma, limits = c(0,y_lim), #c(lower limit, upper limit)
+    breaks = seq(0,y_lim,y_lim/10)) +  #seq(lower limit, upper limit, tick frequency)
+  labs(x = "Punctum within Mitochondria mask",
+       y = "Displacement per frame (µm)") +
+  theme(
+    axis.text.x = element_text(face = 'bold', angle = 45, hjust = 1), 
+    axis.title.x = element_text(face = 'bold'),
+    axis.text.y = element_text(face = 'bold'), 
+    axis.title.y = element_text(face = 'bold'),
+    legend.title = element_text(face = 'bold'),
+    legend.text = element_text(face = 'bold'),
+    strip.text.x = element_text(face = 'bold')) +
+  facet_grid(~guide)
+
+# lysosome
+ggplot(data = valid_tracks,
+       aes(x = displacement,
+           y = puncta_lysosome_pcc_raw)) +
+  geom_point() +
+  facet_grid(~guide)
+
+ggplot(data = valid_tracks,
+       aes(x = displacement,
+           y = puncta_lysosome_pcc_bgsub)) +
+  geom_point() +
+  facet_grid(~guide)
+
+ggplot(data = valid_tracks %>% filter(lysosome_inside == "False"),
+       aes(x = displacement,
+           y = lysosome_edge_dist)) +
+  geom_point() +
+  facet_grid(~guide)
+
+# mitochondria
+ggplot(data = valid_tracks,
+       aes(x = displacement,
+           y = puncta_mitochondria_pcc_raw)) +
+  geom_point() +
+  facet_grid(~guide)
+
+ggplot(data = valid_tracks,
+       aes(x = displacement,
+           y = puncta_mitochondria_pcc_bgsub)) +
+  geom_point() +
+  facet_grid(~guide)
+
+ggplot(data = valid_tracks %>% filter(mitochondria_inside == "False"),
+       aes(x = displacement,
+           y = mitochondria_edge_dist)) +
+  geom_point() +
+  facet_grid(~guide)
+```
+
+## Instant velocity
+
+```{r}
+y_lim <- valid_tracks %>% 
+  #filter(Outlier == "Normal") %>%
+  pull(instant_velocity) %>% 
+  max(., na.rm = TRUE) %>% 
+  round_any(., 5, ceiling)
+
+ggplot(data = valid_tracks,
+       aes(x = guide,
+           y = instant_velocity)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = factor(well)), width = 0.2, size = 0.5) +
+  #geom_point(position = position_jitterdodge(jitter.width = 0.2)) +
+  theme_bw() +
+  scale_y_continuous(
+    labels = scales::comma, limits = c(0,y_lim), #c(lower limit, upper limit)
+    breaks = seq(0,y_lim,y_lim/10)) +  #seq(lower limit, upper limit, tick frequency)
+  labs(x = "Guide RNA",
+       y = "Instantaneous velocity (µm/s)") +
+  theme(
+    axis.text.x = element_text(face = 'bold', angle = 45, hjust = 1), 
+    axis.title.x = element_text(face = 'bold'),
+    axis.text.y = element_text(face = 'bold'), 
+    axis.title.y = element_text(face = 'bold'),
+    legend.title = element_text(face = 'bold'),
+    legend.text = element_text(face = 'bold'),
+    strip.text.x = element_text(face = 'bold'))
+ggsave("InstantVelocity.png", width = 3, height = 4, path = "./Output_graphs/")
+
+ggplot(data = valid_tracks,
+       aes(x = lysosome_inside,
+           y = instant_velocity)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = factor(well)), width = 0.2, size = 0.5) +
+  #geom_point(position = position_jitterdodge(jitter.width = 0.2)) +
+  theme_bw() +
+  scale_y_continuous(
+    labels = scales::comma, limits = c(0,y_lim), #c(lower limit, upper limit)
+    breaks = seq(0,y_lim,y_lim/10)) +  #seq(lower limit, upper limit, tick frequency)
+  labs(x = "Punctum within lysosome mask",
+       y = "Instantaneous velocity (µm/s)") +
+  theme(
+    axis.text.x = element_text(face = 'bold', angle = 45, hjust = 1), 
+    axis.title.x = element_text(face = 'bold'),
+    axis.text.y = element_text(face = 'bold'), 
+    axis.title.y = element_text(face = 'bold'),
+    legend.title = element_text(face = 'bold'),
+    legend.text = element_text(face = 'bold'),
+    strip.text.x = element_text(face = 'bold')) +
+  facet_grid(~guide)
+
+ggplot(data = valid_tracks,
+       aes(x = mitochondria_inside,
+           y = instant_velocity)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = factor(well)), width = 0.2, size = 0.5) +
+  #geom_point(position = position_jitterdodge(jitter.width = 0.2)) +
+  theme_bw() +
+  scale_y_continuous(
+    labels = scales::comma, limits = c(0,y_lim), #c(lower limit, upper limit)
+    breaks = seq(0,y_lim,y_lim/10)) +  #seq(lower limit, upper limit, tick frequency)
+  labs(x = "Punctum within mitochondria mask",
+       y = "Instantaneous velocity (µm/s)") +
+  theme(
+    axis.text.x = element_text(face = 'bold', angle = 45, hjust = 1), 
+    axis.title.x = element_text(face = 'bold'),
+    axis.text.y = element_text(face = 'bold'), 
+    axis.title.y = element_text(face = 'bold'),
+    legend.title = element_text(face = 'bold'),
+    legend.text = element_text(face = 'bold'),
+    strip.text.x = element_text(face = 'bold')) +
+  facet_grid(~guide)
+
+# lysosome
+ggplot(data = valid_tracks,
+       aes(x = instant_velocity,
+           y = puncta_lysosome_pcc_raw)) +
+  geom_point() +
+  facet_grid(~guide)
+
+ggplot(data = valid_tracks,
+       aes(x = instant_velocity,
+           y = puncta_lysosome_pcc_bgsub)) +
+  geom_point() +
+  facet_grid(~guide)
+
+ggplot(data = valid_tracks %>% filter(lysosome_inside == "False"),
+       aes(x = instant_velocity,
+           y = lysosome_edge_dist)) +
+  geom_point() +
+  facet_grid(~guide)
+
+# mitochondria
+ggplot(data = valid_tracks,
+       aes(x = instant_velocity,
+           y = puncta_mitochondria_pcc_raw)) +
+  geom_point() +
+  facet_grid(~guide)
+
+ggplot(data = valid_tracks,
+       aes(x = instant_velocity,
+           y = puncta_mitochondria_pcc_bgsub)) +
+  geom_point() +
+  facet_grid(~guide)
+
+ggplot(data = valid_tracks %>% filter(mitochondria_inside == "False"),
+       aes(x = instant_velocity,
+           y = mitochondria_edge_dist)) +
+  geom_point() +
+  facet_grid(~guide)
+```
+
+# Track summary analysis
+
+```{r}
+# ---- 1. per frame: state, step state, run id ---------------------------
+tracks_annotated <- valid_tracks %>%
+  group_by(well, movie, particle, guide) %>%
+  arrange(frame, .by_group = TRUE) %>%
+  mutate(
+    lysosome_state = case_when(
+      lysosome_inside == "True" ~ "Inside",
+      lysosome_inside == "False" & lysosome_edge_dist <= 10 ~ "Near",
+      lysosome_inside == "False" & lysosome_edge_dist > 10  ~ "Far",
+      TRUE ~ NA_character_
+    ),
+    previous_state = lag(lysosome_state),
+    step_state = case_when(
+      is.na(previous_state) | is.na(lysosome_state) ~ NA_character_,
+      previous_state == lysosome_state ~ lysosome_state,
+      TRUE ~ "Transition"
+    ),
+    # a new run starts whenever the state changes
+    run_id = cumsum(is.na(previous_state) | lysosome_state != previous_state)
+  ) %>%
+  ungroup()
+
+# ---- 2. per track -----------------------------------------------------
+track_summary <- tracks_annotated %>%
+  group_by(well, movie, particle, guide) %>%
+  arrange(frame, .by_group = TRUE) %>%
+  summarise(
+    track_start_y      = first(y_um),
+    track_start_x      = first(x_um),
+    track_end_y        = last(y_um),
+    track_end_x        = last(x_um),
+    duration_frames    = last(frame) - first(frame),
+    duration_time      = last(Time_sec) - first(Time_sec),
+    net_displacement   = sqrt((last(y_um) - first(y_um))^2 + (last(x_um) - first(x_um))^2),
+    path_length        = sum(displacement, na.rm = TRUE),
+    velocity           = path_length / duration_time,
+    net_velocity       = net_displacement / duration_time,
+    max_velocity       = max(instant_velocity, na.rm = TRUE),
+    stdev_velocity     = sd(instant_velocity, na.rm = TRUE),
+    straightness       = net_displacement / path_length,
+    radius_of_gyration = sqrt(mean((y_um - mean(y_um))^2 + (x_um - mean(x_um))^2)),
+    n_frames_scored    = sum(!is.na(lysosome_state)),
+    frac_inside        = mean(lysosome_state == "Inside", na.rm = TRUE),
+    frac_near          = mean(lysosome_state == "Near",   na.rm = TRUE),
+    frac_far           = mean(lysosome_state == "Far",    na.rm = TRUE),
+    n_transitions      = sum(step_state == "Transition", na.rm = TRUE),
+    n_inside_runs      = n_distinct(run_id[lysosome_state %in% "Inside"]),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    lysosome_interaction = case_when(
+      n_frames_scored == 0 ~ NA_character_,
+      frac_inside == 0     ~ "Never inside",
+      frac_inside >= 0.95  ~ "Always inside",
+      TRUE                 ~ "Partial"
+    ),
+    lysosome_interaction = factor(lysosome_interaction,
+                                  levels = c("Never inside", "Partial", "Always inside"))
+  )
+
+# ---- 3. per track per state: speed while Far / Near / Inside ----------
+state_speed_summary <- tracks_annotated %>%
+  filter(step_state %in% c("Far", "Near", "Inside"), is.finite(instant_velocity)) %>%
+  mutate(step_state = factor(step_state, levels = c("Far", "Near", "Inside"))) %>%
+  group_by(well, movie, particle, guide, step_state) %>%
+  summarise(
+    n_steps      = n(),
+    mean_speed   = mean(instant_velocity),
+    median_speed = median(instant_velocity),
+    .groups      = "drop"
+  ) %>%
+  left_join(track_summary, by = c("well", "movie", "particle", "guide")) %>%
+  mutate(frac_steps = n_steps / duration_frames)
+
+# ---- 4. per run (tracklet): each contiguous stretch in one state -------
+run_summary <- tracks_annotated %>%
+  filter(!is.na(lysosome_state)) %>%
+  group_by(well, movie, particle, guide, run_id, lysosome_state) %>%
+  arrange(frame, .by_group = TRUE) %>%
+  summarise(
+    run_start_frame      = first(frame),
+    run_end_frame        = last(frame),
+    run_frames           = n(),
+    run_time             = last(Time_sec) - first(Time_sec),
+    # drop the first step of the run: that displacement happened partly in the previous state
+    run_path_length      = sum(displacement[-1], na.rm = TRUE),
+    run_net_displacement = sqrt((last(y_um) - first(y_um))^2 + (last(x_um) - first(x_um))^2),
+    run_speed            = mean(instant_velocity[-1], na.rm = TRUE),
+    run_median_speed     = median(instant_velocity[-1], na.rm = TRUE),
+    lysosome_label       = names(which.max(table(lysosome_label))),   # most common label in the run
+    .groups = "drop"
+  ) %>%
+  mutate(
+    lysosome_state  = factor(lysosome_state, levels = c("Far", "Near", "Inside")),
+    run_speed        = if_else(is.nan(run_speed), NA_real_, run_speed),
+    run_median_speed = if_else(is.nan(run_median_speed), NA_real_, run_median_speed),
+    run_straightness = if_else(run_path_length > 0, run_net_displacement / run_path_length, NA_real_)
+  ) %>%
+  # what came before and after this run, within the same track
+  group_by(movie, particle) %>%
+  arrange(run_id, .by_group = TRUE) %>%
+  mutate(
+    run_index      = row_number(),
+    n_runs_in_track = n(),
+    previous_state = lag(lysosome_state),
+    next_state     = lead(lysosome_state)
+  ) %>%
+  ungroup() %>%
+  # carry the track-level class and whole-track metrics
+  left_join(
+    select(track_summary, movie, particle, lysosome_interaction,
+           duration_frames, velocity, straightness, frac_inside),
+    by = c("movie", "particle")
+  )
+```
+
+```{r}
+track_summary %>% nrow()
+```
+
+## Duration
+
+```{r}
+y_lim <- track_summary %>% 
+  #filter(Outlier == "Normal") %>%
+  pull(duration_frames) %>% 
+  max(., na.rm = TRUE) %>% 
+  round_any(., 5, ceiling)
+
+ggplot(data = track_summary,
+       aes(x = guide,
+           y = duration_frames)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = factor(well)), width = 0.2, size = 0.5) +
+  #geom_point(position = position_jitterdodge(jitter.width = 0.2)) +
+  theme_bw() +
+  scale_y_continuous(
+    labels = scales::comma, limits = c(0,y_lim), #c(lower limit, upper limit)
+    breaks = seq(0,y_lim,y_lim/10)) +  #seq(lower limit, upper limit, tick frequency)
+  labs(x = "Guide RNA",
+       y = "Duration (frames)") +
+  theme(
+    axis.text.x = element_text(face = 'bold', angle = 45, hjust = 1), 
+    axis.title.x = element_text(face = 'bold'),
+    axis.text.y = element_text(face = 'bold'), 
+    axis.title.y = element_text(face = 'bold'),
+    legend.title = element_text(face = 'bold'),
+    legend.text = element_text(face = 'bold'),
+    strip.text.x = element_text(face = 'bold')) 
+ggsave("duration_frames.png", width = 3, height = 4, path = "./Output_graphs/")
+
+ggplot(data = state_speed_summary,
+       aes(x = step_state, 
+           y = duration_frames)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = factor(well)), width = 0.2, height = 0, alpha = 0.6) +
+  theme_bw() +
+  scale_y_continuous(
+    labels = scales::comma,
+    limits = c(0, y_lim),
+    breaks = seq(0, y_lim, length.out = 11)
+  ) +
+  labs(
+    x = "Lysosome association",
+    y = "Duration (frames)",
+    color = "Well"
+  ) +
+  theme(
+    axis.text.x = element_text(face = "bold", angle = 45, hjust = 1),
+    axis.title = element_text(face = "bold"),
+    axis.text.y = element_text(face = "bold"),
+    legend.title = element_text(face = "bold"),
+    legend.text = element_text(face = "bold")
+  ) + 
+  facet_grid(~guide)
+ggsave("duration_frames_LysoBins.png", width = 3, height = 4, path = "./Output_graphs/")
+
+y_lim <- track_summary %>% 
+  #filter(Outlier == "Normal") %>%
+  pull(duration_time) %>% 
+  max(., na.rm = TRUE) %>% 
+  round_any(., 5, ceiling)
+
+ggplot(data = track_summary,
+       aes(x = guide,
+           y = duration_time)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = factor(well)), width = 0.2, size = 0.5) +
+  #geom_point(position = position_jitterdodge(jitter.width = 0.2)) +
+  theme_bw() +
+  scale_y_continuous(
+    labels = scales::comma, limits = c(0,y_lim), #c(lower limit, upper limit)
+    breaks = seq(0,y_lim,y_lim/10)) +  #seq(lower limit, upper limit, tick frequency)
+  labs(x = "Guide RNA",
+       y = "Duration (s)") +
+  theme(
+    axis.text.x = element_text(face = 'bold', angle = 45, hjust = 1), 
+    axis.title.x = element_text(face = 'bold'),
+    axis.text.y = element_text(face = 'bold'), 
+    axis.title.y = element_text(face = 'bold'),
+    legend.title = element_text(face = 'bold'),
+    legend.text = element_text(face = 'bold'),
+    strip.text.x = element_text(face = 'bold')) 
+ggsave("duration_time.png", width = 3, height = 4, path = "./Output_graphs/")
+
+ggplot(data = state_speed_summary,
+       aes(x = step_state, 
+           y = duration_time)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = factor(well)), width = 0.2, height = 0, alpha = 0.6) +
+  theme_bw() +
+  scale_y_continuous(
+    labels = scales::comma,
+    limits = c(0, y_lim),
+    breaks = seq(0, y_lim, length.out = 11)
+  ) +
+  labs(
+    x = "Lysosome association",
+    y = "Duration (s)",
+    color = "Well"
+  ) +
+  theme(
+    axis.text.x = element_text(face = "bold", angle = 45, hjust = 1),
+    axis.title = element_text(face = "bold"),
+    axis.text.y = element_text(face = "bold"),
+    legend.title = element_text(face = "bold"),
+    legend.text = element_text(face = "bold")
+  ) + 
+  facet_grid(~guide)
+ggsave("duration_time_LysoBins.png", width = 3, height = 4, path = "./Output_graphs/")
+```
+
+## Displacement: net and path
+
+```{r}
+y_lim <- track_summary %>% 
+  #filter(Outlier == "Normal") %>%
+  pull(net_displacement) %>% 
+  max(., na.rm = TRUE) %>% 
+  round_any(., 5, ceiling)
+
+ggplot(data = track_summary,
+       aes(x = guide,
+           y = net_displacement)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = factor(well)), width = 0.2, size = 0.5) +
+  #geom_point(position = position_jitterdodge(jitter.width = 0.2)) +
+  theme_bw() +
+  scale_y_continuous(
+    labels = scales::comma, limits = c(0,y_lim), #c(lower limit, upper limit)
+    breaks = seq(0,y_lim,y_lim/10)) +  #seq(lower limit, upper limit, tick frequency)
+  labs(x = "Guide RNA",
+       y = "Net displacement (µm)") +
+  theme(
+    axis.text.x = element_text(face = 'bold', angle = 45, hjust = 1), 
+    axis.title.x = element_text(face = 'bold'),
+    axis.text.y = element_text(face = 'bold'), 
+    axis.title.y = element_text(face = 'bold'),
+    legend.title = element_text(face = 'bold'),
+    legend.text = element_text(face = 'bold'),
+    strip.text.x = element_text(face = 'bold')) 
+ggsave("displacement_net.png", width = 3, height = 4, path = "./Output_graphs/")
+
+ggplot(data = state_speed_summary,
+       aes(x = step_state, 
+           y = net_displacement)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = factor(well)), width = 0.2, height = 0, alpha = 0.6) +
+  theme_bw() +
+  scale_y_continuous(
+    labels = scales::comma,
+    limits = c(0, y_lim),
+    breaks = seq(0, y_lim, length.out = 11)
+  ) +
+  labs(
+    x = "Lysosome association",
+    y = "Net displacement (µm)",
+    color = "Well"
+  ) +
+  theme(
+    axis.text.x = element_text(face = "bold", angle = 45, hjust = 1),
+    axis.title = element_text(face = "bold"),
+    axis.text.y = element_text(face = "bold"),
+    legend.title = element_text(face = "bold"),
+    legend.text = element_text(face = "bold")
+  ) + 
+  facet_grid(~guide)
+ggsave("displacement_net_LysoBins.png", width = 3, height = 4, path = "./Output_graphs/")
+
+y_lim <- track_summary %>% 
+  #filter(Outlier == "Normal") %>%
+  pull(path_length) %>% 
+  max(., na.rm = TRUE) %>% 
+  round_any(., 5, ceiling)
+
+ggplot(data = track_summary,
+       aes(x = guide,
+           y = path_length)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = factor(well)), width = 0.2, size = 0.5) +
+  #geom_point(position = position_jitterdodge(jitter.width = 0.2)) +
+  theme_bw() +
+  scale_y_continuous(
+    labels = scales::comma, limits = c(0,y_lim), #c(lower limit, upper limit)
+    breaks = seq(0,y_lim,y_lim/10)) +  #seq(lower limit, upper limit, tick frequency)
+  labs(x = "Guide RNA",
+       y = "Track length (µm)") +
+  theme(
+    axis.text.x = element_text(face = 'bold', angle = 45, hjust = 1), 
+    axis.title.x = element_text(face = 'bold'),
+    axis.text.y = element_text(face = 'bold'), 
+    axis.title.y = element_text(face = 'bold'),
+    legend.title = element_text(face = 'bold'),
+    legend.text = element_text(face = 'bold'),
+    strip.text.x = element_text(face = 'bold')) 
+ggsave("displacement_path.png", width = 3, height = 4, path = "./Output_graphs/")
+
+ggplot(data = state_speed_summary,
+       aes(x = step_state, 
+           y = path_length)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = factor(well)), width = 0.2, height = 0, alpha = 0.6) +
+  theme_bw() +
+  scale_y_continuous(
+    labels = scales::comma,
+    limits = c(0, y_lim),
+    breaks = seq(0, y_lim, length.out = 11)
+  ) +
+  labs(
+    x = "Lysosome association",
+    y = "Track length (µm)",
+    color = "Well"
+  ) +
+  theme(
+    axis.text.x = element_text(face = "bold", angle = 45, hjust = 1),
+    axis.title = element_text(face = "bold"),
+    axis.text.y = element_text(face = "bold"),
+    legend.title = element_text(face = "bold"),
+    legend.text = element_text(face = "bold")
+  ) + 
+  facet_grid(~guide)
+ggsave("displacement_path_LysoBins.png", width = 3, height = 4, path = "./Output_graphs/")
+```
+
+```{r}
+# per-track: does interaction status relate to net displacement?  (one point per track)
+ggplot(track_summary, aes(x = lysosome_interaction, y = net_displacement)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = factor(well)), width = 0.2, height = 0, alpha = 0.6) +
+  facet_grid(~guide) 
+
+# per-state: speed while in each state  (one point per track per state — a real per-state metric)
+ggplot(state_speed_summary, aes(x = step_state, y = mean_speed)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = factor(well)), width = 0.2, height = 0, alpha = 0.6) +
+  facet_grid(~guide) 
+
+# paired: same track, inside vs far
+state_speed_summary %>%
+  filter(step_state %in% c("Far", "Inside")) %>%
+  group_by(movie, particle) %>% filter(n() == 2) %>% ungroup() %>%
+  ggplot(aes(x = step_state, y = mean_speed, group = interaction(movie, particle))) +
+  geom_line(alpha = 0.2) + geom_point(aes(color = factor(well)), alpha = 0.6) +
+  facet_grid(~guide) 
+```
+
+## Velocity
+
+velocity, net velocity, max velocity
+
+```{r}
+y_lim <- track_summary %>% 
+  #filter(Outlier == "Normal") %>%
+  pull(velocity) %>% 
+  max(., na.rm = TRUE) %>% 
+  round_any(., 5, ceiling)
+
+ggplot(data = track_summary,
+       aes(x = guide,
+           y = velocity)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = factor(well)), width = 0.2, size = 0.5) +
+  #geom_point(position = position_jitterdodge(jitter.width = 0.2)) +
+  theme_bw() +
+  scale_y_continuous(
+    labels = scales::comma, limits = c(0,y_lim), #c(lower limit, upper limit)
+    breaks = seq(0,y_lim,y_lim/10)) +  #seq(lower limit, upper limit, tick frequency)
+  labs(x = "Guide RNA",
+       y = "Velocity (µm/s)") +
+  theme(
+    axis.text.x = element_text(face = 'bold', angle = 45, hjust = 1), 
+    axis.title.x = element_text(face = 'bold'),
+    axis.text.y = element_text(face = 'bold'), 
+    axis.title.y = element_text(face = 'bold'),
+    legend.title = element_text(face = 'bold'),
+    legend.text = element_text(face = 'bold'),
+    strip.text.x = element_text(face = 'bold')) 
+ggsave("velocity.png", width = 3, height = 4, path = "./Output_graphs/")
+
+ggplot(data = track_summary,
+       aes(x = lysosome_interaction,
+           y = velocity)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = factor(well)), width = 0.2, size = 0.5) +
+  #geom_point(position = position_jitterdodge(jitter.width = 0.2)) +
+  theme_bw() +
+  scale_y_continuous(
+    labels = scales::comma, limits = c(0,y_lim), #c(lower limit, upper limit)
+    breaks = seq(0,y_lim,y_lim/10)) +  #seq(lower limit, upper limit, tick frequency)
+  labs(x = "Guide RNA",
+       y = "Velocity (µm/s)") +
+  theme(
+    axis.text.x = element_text(face = 'bold', angle = 45, hjust = 1), 
+    axis.title.x = element_text(face = 'bold'),
+    axis.text.y = element_text(face = 'bold'), 
+    axis.title.y = element_text(face = 'bold'),
+    legend.title = element_text(face = 'bold'),
+    legend.text = element_text(face = 'bold'),
+    strip.text.x = element_text(face = 'bold')) +
+  facet_grid(~guide)
+ggsave("velocity_LysoBins.png", width = 5, height = 4, path = "./Output_graphs/")
+
+ggplot(data = state_speed_summary,
+       aes(x = step_state, 
+           y = mean_speed)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = factor(well)), width = 0.2, height = 0, alpha = 0.6) +
+  theme_bw() +
+  scale_y_continuous(
+    labels = scales::comma,
+    limits = c(0, y_lim),
+    breaks = seq(0, y_lim, length.out = 11)
+  ) +
+  labs(
+    x = "Lysosome association",
+    y = "Mean speed (µm/s)",
+    color = "Well"
+  ) +
+  theme(
+    axis.text.x = element_text(face = "bold", angle = 45, hjust = 1),
+    axis.title = element_text(face = "bold"),
+    axis.text.y = element_text(face = "bold"),
+    legend.title = element_text(face = "bold"),
+    legend.text = element_text(face = "bold"),
+    strip.text.x = element_text(face = 'bold')
+  ) + 
+  facet_grid(~guide)
+ggsave("velocity_LysoInteraction.png", width = 5, height = 4, path = "./Output_graphs/")
+```
+
+```{r}
+tracklets <- run_summary %>%
+  semi_join(filter(track_summary, lysosome_interaction == "Partial"),
+            by = c("movie", "particle")) %>%
+  filter(run_frames >= 3)          # need at least 2 within-run steps for a speed
+
+ggplot(tracklets, aes(x = lysosome_state, y = run_speed)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = factor(well)), width = 0.2, height = 0, alpha = 0.5, size = 0.7) +
+  facet_grid(~guide) +
+  labs(x = "Tracklet state", y = "Speed during tracklet (µm/s)", color = "Well") 
+
+tracklets %>%
+  filter(lysosome_state %in% c("Far", "Inside")) %>%
+  group_by(well, movie, particle, guide, lysosome_state) %>%
+  summarise(speed = weighted.mean(run_speed, run_frames), .groups = "drop") %>%
+  group_by(movie, particle) %>% filter(n() == 2) %>% ungroup() %>%
+  ggplot(aes(x = lysosome_state, y = speed, group = interaction(movie, particle))) +
+  geom_line(alpha = 0.25) +
+  geom_point(aes(color = factor(well)), alpha = 0.7) +
+  facet_grid(~guide) +
+  labs(x = NULL, y = "Speed (µm/s)", color = "Well") 
+
+paired_io <- run_summary %>%
+  filter(lysosome_interaction == "Partial", run_frames >= 2, !is.na(run_speed)) %>%
+  mutate(location = if_else(lysosome_state == "Inside", "Inside", "Outside")) %>%
+  group_by(well, movie, particle, guide, location) %>%
+  summarise(speed = weighted.mean(run_speed, run_frames - 1), .groups = "drop") %>%
+  group_by(movie, particle) %>% filter(n() == 2) %>% ungroup() %>%
+  mutate(location = factor(location, levels = c("Outside", "Inside")))
+
+ggplot(paired_io, aes(x = location, y = speed, group = interaction(movie, particle))) +
+  geom_line(alpha = 0.25) +
+  geom_point(aes(color = factor(well)), alpha = 0.7) +
+  facet_grid(~guide) +
+  labs(x = NULL, y = "Speed (µm/s)", color = "Well") 
+
+# the number that goes with it: per-track log ratio, one value per track
+paired_io %>%
+  pivot_wider(names_from = location, values_from = speed) %>%
+  mutate(log_ratio = log2(Inside / Outside)) %>%
+  group_by(guide) %>%
+  summarise(n = n(),
+            median_log2_ratio = median(log_ratio),
+            frac_slower_inside = mean(log_ratio < 0),
+            p_wilcox = wilcox.test(log_ratio)$p.value)
+
+ratios <- paired_io %>%
+  pivot_wider(names_from = location, values_from = speed) %>%
+  filter(Inside > 0, Outside > 0) %>%
+  mutate(log_ratio = log2(Inside / Outside))
+
+# per well
+ratios %>%
+  group_by(guide, well) %>%
+  summarise(n = n(), median_log2 = median(log_ratio),
+            frac_slower = mean(log_ratio < 0), .groups = "drop")
+
+# does the ratio depend on how fast the particle was outside?
+ggplot(ratios, aes(x = Outside, y = log_ratio, color = guide)) +
+  geom_hline(yintercept = 0, linetype = 2) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "loess", se = FALSE) +
+  labs(x = "Outside speed (µm/s)", y = "log2(Inside / Outside)") 
+
+# formal guide comparison, adjusting for outside speed
+summary(lm(log_ratio ~ guide + log2(Outside), data = ratios))
+wilcox.test(log_ratio ~ guide, data = ratios)
+```
+
+```{r}
+step_data <- valid_tracks %>%
+  group_by(movie, particle) %>%
+  arrange(frame, .by_group = TRUE) %>%
+  mutate(
+    lysosome_state = case_when(
+      lysosome_inside == "True" ~ "Inside",
+      lysosome_inside == "False" & lysosome_edge_dist <= 10 ~ "Near",
+      lysosome_inside == "False" & lysosome_edge_dist > 10 ~ "Far",
+      TRUE ~ NA_character_
+    ),
+    previous_state = lag(lysosome_state),
+    step_state = case_when(
+      is.na(previous_state) | is.na(lysosome_state) ~ NA_character_,
+      previous_state == lysosome_state ~ lysosome_state,
+      TRUE ~ "Transition"
+    )
+  ) %>%
+  ungroup()
+
+particle_state_summary <- step_data %>%
+  filter(
+    step_state %in% c("Far", "Near", "Inside"),
+    is.finite(instant_velocity)
+  ) %>%
+  mutate(
+    step_state = factor(step_state, levels = c("Far", "Near", "Inside"))
+  ) %>%
+  group_by(well, movie, particle, step_state, guide) %>%
+  summarise(
+    n_steps = n(),
+    mean_speed = mean(instant_velocity),
+    median_speed = median(instant_velocity),
+    .groups = "drop"
+  )
+
+y_lim <- particle_state_summary %>% 
+  #filter(Outlier == "Normal") %>%
+  pull(mean_speed) %>% 
+  max(., na.rm = TRUE) %>% 
+  round_any(., 5, ceiling)
+
+ggplot(
+  data = particle_state_summary,
+  aes(x = step_state, y = mean_speed)
+) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(
+    aes(color = factor(well)),
+    width = 0.2,
+    height = 0,
+    alpha = 0.6
+  ) +
+  theme_bw() +
+  scale_y_continuous(
+    labels = scales::comma,
+    limits = c(0, y_lim),
+    breaks = seq(0, y_lim, length.out = 11)
+  ) +
+  labs(
+    x = "Lysosome association",
+    y = "Mean speed (µm/s)",
+    color = "Well"
+  ) +
+  theme(
+    axis.text.x = element_text(face = "bold", angle = 45, hjust = 1),
+    axis.title = element_text(face = "bold"),
+    axis.text.y = element_text(face = "bold"),
+    legend.title = element_text(face = "bold"),
+    legend.text = element_text(face = "bold")
+  ) + 
+  facet_grid(~guide)
+```
+
+straightness
+
+radius of gyration
+
+```{r}
+# ---- Colocalization state vs speed (mirrors the Far / Near / Inside plot) ----
+# Cutoff chosen by calibrating PCC against the mask-based inside/outside call
+# (best Youden's J across the full batch: sensitivity 0.88, specificity 0.81).
+pcc_cutoff <- 0.6
+
+coloc_steps <- valid_tracks %>%
+  group_by(well, movie, particle, guide) %>%
+  arrange(frame, .by_group = TRUE) %>%
+  mutate(
+    coloc_state = case_when(
+      is.na(puncta_lysosome_pcc_raw)            ~ NA_character_,
+      puncta_lysosome_pcc_raw >= pcc_cutoff     ~ "Colocalized",
+      TRUE                                        ~ "Not colocalized"
+    ),
+    previous_coloc_state = lag(coloc_state),
+    coloc_step_state = case_when(
+      is.na(previous_coloc_state) | is.na(coloc_state) ~ NA_character_,
+      previous_coloc_state == coloc_state              ~ coloc_state,
+      TRUE                                             ~ "Transition"
+    )
+  ) %>%
+  ungroup()
+
+coloc_state_summary <- coloc_steps %>%
+  filter(coloc_step_state %in% c("Not colocalized", "Colocalized"),
+         is.finite(instant_velocity)) %>%
+  mutate(coloc_step_state = factor(coloc_step_state,
+                                   levels = c("Not colocalized", "Colocalized"))) %>%
+  group_by(well, movie, particle, guide, coloc_step_state) %>%
+  summarise(
+    n_steps      = n(),
+    mean_speed   = mean(instant_velocity),
+    median_speed = median(instant_velocity),
+    .groups      = "drop"
+  )
+
+y_lim <- coloc_state_summary %>%
+  pull(mean_speed) %>%
+  max(., na.rm = TRUE) %>%
+  round_any(., 5, ceiling)
+
+ggplot(coloc_state_summary, aes(x = coloc_step_state, y = mean_speed)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = factor(well)), width = 0.2, height = 0, alpha = 0.6) +
+  theme_bw() +
+  scale_y_continuous(
+    labels = scales::comma, limits = c(0, y_lim),
+    breaks = seq(0, y_lim, length.out = 11)) +
+  labs(x = "Lysosome colocalization (box PCC)",
+       y = "Mean speed (µm/s)",
+       color = "Well") +
+  theme(
+    axis.text.x  = element_text(face = "bold", angle = 45, hjust = 1),
+    axis.title   = element_text(face = "bold"),
+    axis.text.y  = element_text(face = "bold"),
+    legend.title = element_text(face = "bold"),
+    legend.text  = element_text(face = "bold")) +
+  facet_grid(~guide)
+ggsave("velocity_LysoColoc.png", width = 5, height = 4, path = "./Output_graphs/")
+
+coloc_steps <- valid_tracks %>%
+  group_by(well, movie, particle, guide) %>%
+  arrange(frame, .by_group = TRUE) %>%
+  mutate(
+    coloc_state = case_when(
+      is.na(puncta_mitochondria_pcc_raw)            ~ NA_character_,
+      puncta_mitochondria_pcc_raw >= pcc_cutoff     ~ "Colocalized",
+      TRUE                                        ~ "Not colocalized"
+    ),
+    previous_coloc_state = lag(coloc_state),
+    coloc_step_state = case_when(
+      is.na(previous_coloc_state) | is.na(coloc_state) ~ NA_character_,
+      previous_coloc_state == coloc_state              ~ coloc_state,
+      TRUE                                             ~ "Transition"
+    )
+  ) %>%
+  ungroup()
+
+coloc_state_summary <- coloc_steps %>%
+  filter(coloc_step_state %in% c("Not colocalized", "Colocalized"),
+         is.finite(instant_velocity)) %>%
+  mutate(coloc_step_state = factor(coloc_step_state,
+                                   levels = c("Not colocalized", "Colocalized"))) %>%
+  group_by(well, movie, particle, guide, coloc_step_state) %>%
+  summarise(
+    n_steps      = n(),
+    mean_speed   = mean(instant_velocity),
+    median_speed = median(instant_velocity),
+    .groups      = "drop"
+  )
+
+y_lim <- coloc_state_summary %>%
+  pull(mean_speed) %>%
+  max(., na.rm = TRUE) %>%
+  round_any(., 5, ceiling)
+
+ggplot(coloc_state_summary, aes(x = coloc_step_state, y = mean_speed)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = factor(well)), width = 0.2, height = 0, alpha = 0.6) +
+  theme_bw() +
+  scale_y_continuous(
+    labels = scales::comma, limits = c(0, y_lim),
+    breaks = seq(0, y_lim, length.out = 11)) +
+  labs(x = "Mitochondria colocalization (box PCC)",
+       y = "Mean speed (µm/s)",
+       color = "Well") +
+  theme(
+    axis.text.x  = element_text(face = "bold", angle = 45, hjust = 1),
+    axis.title   = element_text(face = "bold"),
+    axis.text.y  = element_text(face = "bold"),
+    legend.title = element_text(face = "bold"),
+    legend.text  = element_text(face = "bold")) +
+  facet_grid(~guide)
+ggsave("velocity_MitoColoc.png", width = 5, height = 4, path = "./Output_graphs/")
+```
+
+# Cotracking analysis
+
+Particle tracks compared with independently tracked lysosome and mitochondria tracks. Organelle tracks come from the same segmentation, density filter, Kalman linking and net-displacement filter used in `organelle_tracker_testing`; episodes and their summaries come from `batch_cotracking.py` and `summarize_cotracking_velocity.py`.
+
+A **cotracking episode** is a run of at least 3 frames in which a particle and an organelle track have centroids within 10 px (gaps of 1 unobserved frame are bridged). Episodes are classed as co-transport (organelle moves and step directions agree), moving contact (organelle moves, directions uncorrelated) or stationary contact. Cotracking is defined by proximity and persistence only, never by velocity, so comparing velocity during and outside episodes is not circular.
+
+Speeds in the cotracking output are in px/frame; they are converted to µm/s below with `pixel_size` and each movie's mean frame duration, so units match the rest of the notebook.
+
+## Load cotracking data
+
+```{r}
+# folder written by batch_cotracking.py (contains movie_summary.csv and summary/)
+cotrack_dir <- "./cotracking"
+
+# per-movie mean frame duration (s) to convert px/frame -> um/s
+movie_frame_duration <- time_intervals %>%
+  group_by(image_name) %>%
+  summarise(mean_frame_duration = mean(frame_duration, na.rm = TRUE), .groups = "drop")
+
+annotate_cotrack <- function(df) {
+  df %>%
+    separate(movie,
+             into = c("guide", "well", "sample_id"),
+             sep = "_",
+             remove = FALSE) %>%
+    mutate(
+      well = as.numeric(str_remove(well, "^Well")),
+      sample_id = as.numeric(str_remove(sample_id, "\\.nd2$"))
+    ) %>%
+    left_join(movie_frame_duration, by = c("movie" = "image_name")) %>%
+    mutate(to_um_s = pixel_size / mean_frame_duration)
+}
+
+# one row per particle track x organelle type
+track_speed <- read.csv(file.path(cotrack_dir, "summary", "track_speed.csv")) %>%
+  annotate_cotrack() %>%
+  mutate(
+    across(c(mean_speed, speed_during, speed_outside), ~ .x * to_um_s),
+    cotracking = factor(if_else(cotracks == 1, "Cotracking", "Never"),
+                        levels = c("Never", "Cotracking")),
+    # track-length bins (steps) used to match cotracking and never-cotracking tracks
+    length_bin = cut(n_steps, breaks = c(1, 3, 5, 8, 12, Inf),
+                     labels = c("2-3", "4-5", "6-8", "9-12", "13+"))
+  )
+
+# one row per episode
+cotrack_episodes <- read.csv(file.path(cotrack_dir, "summary", "episodes_all.csv")) %>%
+  annotate_cotrack() %>%
+  mutate(
+    across(c(particle_mean_speed, org_mean_speed), ~ .x * to_um_s),
+    across(c(mean_dist, org_net_disp, particle_net_disp), ~ .x * pixel_size),
+    episode_class = factor(episode_class,
+                           levels = c("co_transport", "moving_contact", "stationary_contact"))
+  )
+
+# one row per particle track with both "during episode" and "outside episode" steps
+cotrack_paired <- read.csv(file.path(cotrack_dir, "summary", "paired_during_vs_outside.csv")) %>%
+  annotate_cotrack() %>%
+  mutate(across(c(speed_during, speed_outside, delta_speed), ~ .x * to_um_s))
+
+# particle step speed relative to episode onset
+cotrack_aligned <- read.csv(file.path(cotrack_dir, "summary", "event_aligned_speed.csv")) %>%
+  annotate_cotrack() %>%
+  mutate(speed = speed * to_um_s)
+
+movie_summary <- read.csv(file.path(cotrack_dir, "movie_summary.csv")) %>%
+  annotate_cotrack()
+
+cotrack_enrichment <- read.csv(file.path(cotrack_dir, "summary", "enrichment.csv"))
+if (!"movie_group" %in% names(cotrack_enrichment)) cotrack_enrichment$movie_group <- "all"
+```
+
+```{r}
+# sanity: every movie should convert cleanly
+track_speed %>% filter(!is.finite(to_um_s)) %>% distinct(movie)
+track_speed %>% distinct(movie) %>% nrow()
+```
+
+## Cotracking frequency
+
+How often does a particle track cotrack with an organelle track? One value per movie.
+
+```{r}
+cotrack_rate <- track_speed %>%
+  group_by(organelle, guide, well, movie) %>%
+  summarise(
+    n_tracks       = n(),
+    n_cotracking   = sum(cotracks),
+    pct_cotracking = 100 * n_cotracking / n_tracks,
+    .groups = "drop"
+  )
+
+# pooled counts
+cotrack_rate %>%
+  group_by(organelle, guide) %>%
+  summarise(
+    n_movies              = n(),
+    movies_with_cotracking = sum(n_cotracking > 0),
+    n_tracks              = sum(n_tracks),
+    n_cotracking          = sum(n_cotracking),
+    pct_cotracking        = 100 * n_cotracking / n_tracks,
+    .groups = "drop"
+  )
+
+ggplot(data = cotrack_rate,
+       aes(x = guide,
+           y = pct_cotracking)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = factor(well)), width = 0.2, size = 1) +
+  theme_bw() +
+  scale_y_continuous(labels = scales::comma) +
+  expand_limits(y = 0) +
+  labs(x = "Guide RNA",
+       y = "Particle tracks cotracking (%)",
+       color = "Well") +
+  theme(
+    axis.text.x = element_text(face = 'bold', angle = 45, hjust = 1),
+    axis.title.x = element_text(face = 'bold'),
+    axis.text.y = element_text(face = 'bold'),
+    axis.title.y = element_text(face = 'bold'),
+    legend.title = element_text(face = 'bold'),
+    legend.text = element_text(face = 'bold'),
+    strip.text.x = element_text(face = 'bold')) +
+  facet_wrap(~organelle, scales = "free_y")
+ggsave("cotracking_rate.png", width = 5, height = 4, path = "./Output_graphs/")
+```
+
+Movies within a well are not independent, so the replicate for the test is the well (4 per guide). With 4 vs 4 wells the exact permutation test has 70 labelings, so the smallest possible two-sided p is 2/70 = 0.029.
+
+```{r}
+well_rates <- cotrack_rate %>%
+  group_by(organelle, guide, well) %>%
+  summarise(
+    n_tracks       = sum(n_tracks),
+    n_cotracking   = sum(n_cotracking),
+    pct_cotracking = 100 * n_cotracking / n_tracks,
+    .groups = "drop"
+  )
+
+well_rates
+
+# exact permutation test on well-level rates; sg100 is the reference
+perm_test_wells <- function(df) {
+  rate    <- df$pct_cotracking
+  is_ref  <- df$guide == "sg100"
+  obs     <- mean(rate[is_ref]) - mean(rate[!is_ref])
+  combos  <- combn(length(rate), sum(is_ref))
+  perm    <- apply(combos, 2, function(idx) mean(rate[idx]) - mean(rate[-idx]))
+  tibble(
+    n_wells_sg100  = sum(is_ref),
+    n_wells_other  = sum(!is_ref),
+    diff_pct_points = obs,
+    p_exact        = mean(abs(perm) >= abs(obs) - 1e-12)
+  )
+}
+
+well_rates %>%
+  group_by(organelle) %>%
+  group_modify(~ perm_test_wells(.x))
+```
+
+Fewer motile lysosome tracks per movie would lower the cotracking rate by itself, so check partner availability (the net-displacement filter keeps only moving organelles).
+
+```{r}
+cotrack_partners <- movie_summary %>%
+  select(movie, guide, well, n_particles, n_lys_tracks, n_mito_tracks) %>%
+  left_join(filter(cotrack_rate, organelle == "lysosome") %>%
+              select(movie, pct_cotracking),
+            by = "movie")
+
+cotrack_partners %>%
+  group_by(guide) %>%
+  summarise(
+    median_lys_tracks  = median(n_lys_tracks),
+    median_mito_tracks = median(n_mito_tracks),
+    median_particles   = median(n_particles),
+    .groups = "drop"
+  )
+
+ggplot(data = cotrack_partners,
+       aes(x = n_lys_tracks,
+           y = pct_cotracking,
+           color = guide)) +
+  geom_point(size = 2) +
+  theme_bw() +
+  labs(x = "Lysosome tracks in movie",
+       y = "Particle tracks cotracking with lysosomes (%)",
+       color = "Guide RNA") +
+  theme(
+    axis.text.x = element_text(face = 'bold'),
+    axis.title.x = element_text(face = 'bold'),
+    axis.text.y = element_text(face = 'bold'),
+    axis.title.y = element_text(face = 'bold'),
+    legend.title = element_text(face = 'bold'),
+    legend.text = element_text(face = 'bold'))
+ggsave("cotracking_partner_availability.png", width = 4, height = 4, path = "./Output_graphs/")
+```
+
+### Observed vs shifted-organelle null
+
+The null translates every organelle track in a movie by a random 40-120 px vector (same movie, same frames) and recounts episodes, so it accounts for how many organelle tracks each movie has. Pooled over movies, per guide.
+
+```{r}
+cotrack_enrichment %>%
+  filter(metric == "episodes")
+
+ggplot(data = filter(cotrack_enrichment, metric == "episodes"),
+       aes(x = movie_group)) +
+  geom_errorbar(aes(ymin = null_p2.5, ymax = null_p97.5), width = 0.2) +
+  geom_point(aes(y = null_mean), shape = 1, size = 2) +
+  geom_point(aes(y = observed), color = "red", size = 3) +
+  theme_bw() +
+  labs(x = "Movie group",
+       y = "Episodes (observed in red; null mean and 95% range in black)") +
+  theme(
+    axis.text.x = element_text(face = 'bold', angle = 45, hjust = 1),
+    axis.title.x = element_text(face = 'bold'),
+    axis.text.y = element_text(face = 'bold'),
+    axis.title.y = element_text(face = 'bold'),
+    strip.text.x = element_text(face = 'bold')) +
+  facet_wrap(~organelle, scales = "free_y")
+ggsave("cotracking_enrichment.png", width = 5, height = 4, path = "./Output_graphs/")
+```
+
+## Episode properties
+
+```{r}
+cotrack_episodes %>%
+  count(organelle_type, guide, episode_class)
+
+cotrack_episodes %>%
+  group_by(organelle_type, guide) %>%
+  summarise(
+    n_episodes            = n(),
+    median_duration       = median(duration),
+    median_particle_speed = median(particle_mean_speed, na.rm = TRUE),
+    median_organelle_speed = median(org_mean_speed, na.rm = TRUE),
+    median_direction_cos  = median(mean_cos, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# does the particle move at the organelle's speed during an episode?
+cotrack_episodes %>%
+  filter(organelle_type == "lysosome") %>%
+  summarise(r = cor(particle_mean_speed, org_mean_speed, use = "complete.obs"),
+            median_ratio = median(particle_mean_speed / org_mean_speed, na.rm = TRUE))
+
+y_lim <- cotrack_episodes %>%
+  filter(organelle_type == "lysosome") %>%
+  pull(particle_mean_speed) %>%
+  max(., na.rm = TRUE) %>%
+  round_any(., 5, ceiling)
+
+ggplot(data = filter(cotrack_episodes, organelle_type == "lysosome"),
+       aes(x = org_mean_speed,
+           y = particle_mean_speed,
+           color = episode_class)) +
+  geom_abline(slope = 1, intercept = 0, linetype = 2) +
+  geom_point(alpha = 0.7) +
+  theme_bw() +
+  coord_cartesian(xlim = c(0, y_lim), ylim = c(0, y_lim)) +
+  labs(x = "Lysosome speed in episode (µm/s)",
+       y = "Particle speed in episode (µm/s)",
+       color = "Episode class") +
+  theme(
+    axis.text.x = element_text(face = 'bold'),
+    axis.title.x = element_text(face = 'bold'),
+    axis.text.y = element_text(face = 'bold'),
+    axis.title.y = element_text(face = 'bold'),
+    legend.title = element_text(face = 'bold'),
+    legend.text = element_text(face = 'bold'),
+    strip.text.x = element_text(face = 'bold')) +
+  facet_grid(~guide)
+ggsave("cotracking_speed_match.png", width = 6, height = 4, path = "./Output_graphs/")
+```
+
+## Velocity: cotracking vs never
+
+Mean speed per particle track, one point per track.
+
+```{r}
+y_lim <- track_speed %>%
+  pull(mean_speed) %>%
+  max(., na.rm = TRUE) %>%
+  round_any(., 5, ceiling)
+
+ggplot(data = track_speed,
+       aes(x = cotracking,
+           y = mean_speed)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = factor(well)), width = 0.2, height = 0, alpha = 0.6) +
+  theme_bw() +
+  scale_y_continuous(
+    labels = scales::comma,
+    limits = c(0, y_lim),
+    breaks = seq(0, y_lim, length.out = 11)
+  ) +
+  labs(
+    x = "Organelle cotracking",
+    y = "Mean speed (µm/s)",
+    color = "Well"
+  ) +
+  theme(
+    axis.text.x = element_text(face = "bold", angle = 45, hjust = 1),
+    axis.title = element_text(face = "bold"),
+    axis.text.y = element_text(face = "bold"),
+    legend.title = element_text(face = "bold"),
+    legend.text = element_text(face = "bold"),
+    strip.text.x = element_text(face = 'bold'),
+    strip.text.y = element_text(face = 'bold')
+  ) +
+  facet_grid(organelle ~ guide)
+ggsave("cotracking_velocity_vs_never.png", width = 5, height = 6, path = "./Output_graphs/")
+```
+
+### Matched for track length
+
+Cotracking tracks are about twice as long as never-cotracking tracks, and a track needs at least 3 contact frames to qualify, so the raw comparison is partly selection. Estimates below are cotracking minus never (µm/s), with 95% intervals from resampling whole movies:
+
+-   `raw`: all tracks
+-   `length_matched`: within track-length bins, pooled over movies
+-   `movie_and_length_matched`: within movie and track-length bin (also removes the sg100 / sg1035 imbalance)
+
+The "outside episodes only" variant uses only the steps a cotracking track takes outside its episodes, which asks whether those particles are faster at baseline or only while cotracking.
+
+```{r}
+set.seed(1)
+n_boot <- 1000
+
+# one row per movie x length bin: counts and summed speeds for each group
+cell_stats <- function(df, speed_col) {
+  df %>%
+    filter(is.finite(.data[[speed_col]])) %>%
+    group_by(movie, length_bin, cotracking) %>%
+    summarise(n = n(), s = sum(.data[[speed_col]]), .groups = "drop") %>%
+    pivot_wider(id_cols = c(movie, length_bin),
+                names_from = cotracking,
+                values_from = c(n, s),
+                values_fill = 0)
+}
+
+# estimates for a given weight per row (movie multiplicity in a bootstrap draw)
+att_estimates <- function(cells, mult = rep(1, nrow(cells))) {
+  w <- mult
+  raw <- sum(w * cells$s_Cotracking) / sum(w * cells$n_Cotracking) -
+         sum(w * cells$s_Never)      / sum(w * cells$n_Never)
+
+  pooled <- tibble(bin = cells$length_bin,
+                   n1 = w * cells$n_Cotracking, n0 = w * cells$n_Never,
+                   s1 = w * cells$s_Cotracking, s0 = w * cells$s_Never) %>%
+    group_by(bin) %>%
+    summarise(across(c(n1, n0, s1, s0), sum), .groups = "drop") %>%
+    filter(n1 > 0, n0 > 0)
+  length_matched <- sum(pooled$n1 * (pooled$s1 / pooled$n1 - pooled$s0 / pooled$n0)) /
+                    sum(pooled$n1)
+
+  ok <- cells$n_Never > 0 & cells$n_Cotracking > 0
+  d_cell <- cells$s_Cotracking / cells$n_Cotracking - cells$s_Never / cells$n_Never
+  movie_and_length_matched <- sum((w * cells$n_Cotracking * d_cell)[ok]) /
+                              sum((w * cells$n_Cotracking)[ok])
+
+  c(raw = raw, length_matched = length_matched,
+    movie_and_length_matched = movie_and_length_matched)
+}
+
+boot_att <- function(cells, label) {
+  movies <- unique(cells$movie)
+  obs    <- att_estimates(cells)
+  boots  <- replicate(n_boot, {
+    draw   <- sample(movies, length(movies), replace = TRUE)
+    counts <- tabulate(match(draw, movies), nbins = length(movies))
+    att_estimates(cells, mult = counts[match(cells$movie, movies)])
+  })
+  tibble(
+    variant   = label,
+    estimator = names(obs),
+    diff      = unname(obs),
+    ci_lo     = unname(apply(boots, 1, quantile, probs = 0.025, na.rm = TRUE)),
+    ci_hi     = unname(apply(boots, 1, quantile, probs = 0.975, na.rm = TRUE))
+  )
+}
+
+att_results <- bind_rows(lapply(c("lysosome", "mitochondria"), function(org) {
+  d <- track_speed %>%
+    filter(organelle == org) %>%
+    mutate(baseline_speed = if_else(cotracks == 1, speed_outside, mean_speed))
+  bind_rows(
+    boot_att(cell_stats(d, "mean_speed"),     "Whole track"),
+    boot_att(cell_stats(d, "baseline_speed"), "Outside episodes only")
+  ) %>%
+    mutate(organelle = org)
+})) %>%
+  mutate(estimator = factor(estimator,
+                            levels = c("movie_and_length_matched", "length_matched", "raw")))
+
+att_results
+
+ggplot(data = att_results,
+       aes(x = diff,
+           y = estimator,
+           color = variant)) +
+  geom_vline(xintercept = 0, linetype = 2) +
+  geom_pointrange(aes(xmin = ci_lo, xmax = ci_hi),
+                  position = position_dodge(width = 0.5)) +
+  theme_bw() +
+  labs(x = "Speed difference, cotracking - never (µm/s)",
+       y = NULL,
+       color = "Steps used") +
+  theme(
+    axis.text.x = element_text(face = 'bold'),
+    axis.title.x = element_text(face = 'bold'),
+    axis.text.y = element_text(face = 'bold'),
+    legend.title = element_text(face = 'bold'),
+    legend.text = element_text(face = 'bold'),
+    strip.text.x = element_text(face = 'bold')) +
+  facet_grid(~organelle)
+ggsave("cotracking_length_matched.png", width = 8, height = 3.5, path = "./Output_graphs/")
+```
+
+Same comparison within each guide (lysosomes). sg1035 has few cotracking tracks, so its interval is wide.
+
+```{r}
+att_by_guide <- bind_rows(lapply(unique(track_speed$guide), function(g) {
+  d <- track_speed %>% filter(organelle == "lysosome", guide == g)
+  boot_att(cell_stats(d, "mean_speed"), "Whole track") %>%
+    mutate(guide = g, n_cotracking_tracks = sum(d$cotracks))
+}))
+
+att_by_guide
+```
+
+## Velocity: during vs outside episodes
+
+Same particle track, steps inside an episode vs steps before, between or after episodes. Each track needs at least 2 steps in each condition.
+
+```{r}
+cotrack_paired_long <- cotrack_paired %>%
+  filter(organelle == "lysosome", episode_class == "all") %>%
+  pivot_longer(c(speed_outside, speed_during),
+               names_to = "location", values_to = "speed") %>%
+  mutate(location = factor(if_else(location == "speed_during", "During", "Outside"),
+                           levels = c("Outside", "During")))
+
+ggplot(cotrack_paired_long,
+       aes(x = location, y = speed, group = interaction(movie, particle))) +
+  geom_line(alpha = 0.25) +
+  geom_point(aes(color = factor(well)), alpha = 0.7) +
+  theme_bw() +
+  labs(x = "Lysosome cotracking episode",
+       y = "Mean speed (µm/s)",
+       color = "Well") +
+  theme(
+    axis.text.x = element_text(face = 'bold'),
+    axis.title.x = element_text(face = 'bold'),
+    axis.text.y = element_text(face = 'bold'),
+    axis.title.y = element_text(face = 'bold'),
+    legend.title = element_text(face = 'bold'),
+    legend.text = element_text(face = 'bold'),
+    strip.text.x = element_text(face = 'bold')) +
+  facet_grid(~guide)
+ggsave("cotracking_paired.png", width = 5, height = 4, path = "./Output_graphs/")
+```
+
+```{r}
+# per-track log2 ratio, one value per track
+cotrack_ratios <- cotrack_paired %>%
+  filter(speed_during > 0, speed_outside > 0) %>%
+  mutate(log_ratio = log2(speed_during / speed_outside))
+
+# by episode class (class "all" pools every episode of that track)
+cotrack_ratios %>%
+  group_by(organelle, episode_class, guide) %>%
+  summarise(
+    n = n(),
+    median_log2_ratio = median(log_ratio),
+    frac_slower_during = mean(log_ratio < 0),
+    p_wilcox = if (n() >= 6) wilcox.test(log_ratio)$p.value else NA_real_,
+    .groups = "drop"
+  )
+
+# per well
+cotrack_ratios %>%
+  filter(organelle == "lysosome", episode_class == "all") %>%
+  group_by(guide, well) %>%
+  summarise(n = n(), median_log2 = median(log_ratio),
+            frac_slower = mean(log_ratio < 0), .groups = "drop")
+
+ggplot(data = filter(cotrack_ratios, episode_class != "all"),
+       aes(x = episode_class,
+           y = log_ratio)) +
+  geom_hline(yintercept = 0, linetype = 2) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = factor(well)), width = 0.2, height = 0, alpha = 0.6) +
+  theme_bw() +
+  labs(
+    x = "Episode class",
+    y = "log2(During / Outside)",
+    color = "Well"
+  ) +
+  theme(
+    axis.text.x = element_text(face = "bold", angle = 45, hjust = 1),
+    axis.title = element_text(face = "bold"),
+    axis.text.y = element_text(face = "bold"),
+    legend.title = element_text(face = "bold"),
+    legend.text = element_text(face = "bold"),
+    strip.text.x = element_text(face = 'bold'),
+    strip.text.y = element_text(face = 'bold')
+  ) +
+  facet_grid(organelle ~ guide)
+ggsave("cotracking_log_ratio_by_class.png", width = 6, height = 6, path = "./Output_graphs/")
+```
+
+During-episode speed tracks the organelle's speed, so the change depends on how fast the particle was outside. Part of the negative slope below is mechanical (the outside speed appears on both sides of the ratio), so read it as "particles adopt the organelle's speed" and not as a separate effect.
+
+```{r}
+lyso_ratios <- cotrack_ratios %>%
+  filter(organelle == "lysosome", episode_class == "all")
+
+ggplot(lyso_ratios, aes(x = speed_outside, y = log_ratio, color = guide)) +
+  geom_hline(yintercept = 0, linetype = 2) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "loess", se = FALSE) +
+  theme_bw() +
+  labs(x = "Outside speed (µm/s)", y = "log2(During / Outside)", color = "Guide RNA")
+
+summary(lm(log_ratio ~ guide + log2(speed_outside), data = lyso_ratios))
+```
+
+## Velocity: event-aligned
+
+Particle step speed relative to the frame an episode starts (0). Episodes that begin at the first frames of a movie have no pre-onset steps, so the set of episodes contributing changes along the x axis; points with fewer than 5 steps are dropped.
+
+```{r}
+cotrack_aligned_summary <- cotrack_aligned %>%
+  filter(organelle == "lysosome") %>%
+  group_by(episode_class, rel_frame) %>%
+  summarise(
+    n          = n(),
+    mean_speed = mean(speed),
+    sem_speed  = sd(speed) / sqrt(n()),
+    .groups    = "drop"
+  ) %>%
+  filter(n >= 5)
+
+ggplot(data = cotrack_aligned_summary,
+       aes(x = rel_frame,
+           y = mean_speed,
+           color = episode_class)) +
+  geom_vline(xintercept = 0, linetype = 3) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(aes(ymin = mean_speed - sem_speed, ymax = mean_speed + sem_speed),
+                width = 0.2) +
+  theme_bw() +
+  labs(x = "Frame relative to cotracking onset",
+       y = "Particle speed (µm/s)",
+       color = "Episode class") +
+  theme(
+    axis.text.x = element_text(face = 'bold'),
+    axis.title.x = element_text(face = 'bold'),
+    axis.text.y = element_text(face = 'bold'),
+    axis.title.y = element_text(face = 'bold'),
+    legend.title = element_text(face = 'bold'),
+    legend.text = element_text(face = 'bold'))
+ggsave("cotracking_event_aligned.png", width = 5, height = 4, path = "./Output_graphs/")
+```
