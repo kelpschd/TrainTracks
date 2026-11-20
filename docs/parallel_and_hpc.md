@@ -42,7 +42,8 @@ python scripts/batch_lyso_interaction.py "$DS/results" --jobs 4              # 4
 python scripts/batch_lyso_interaction.py "$DS/results" --skip-existing       # resume, or combine after shards
 ```
 Each movie is single-threaded and memory-bound (about 157 s per movie serially on the 12-core Mac), so `--jobs`
-scales with the number of movies at once. `--jobs auto` uses the performance cores and `--mem-per-job-gb`
+scales with the number of movies at once. Measured (4 movies, `--jobs 4`): 3 min 0 s wall clock for about 10.5
+min of work, a 3.5x speed-up, with per-movie outputs byte-identical to a serial run. `--jobs auto` uses the performance cores and `--mem-per-job-gb`
 (default 6, a conservative guess until measured: each movie's peak memory is printed when it finishes).
 With `--jobs > 1` per-movie logs go to `<batch_root>/logs/organelle_<movie>.log`. The batch-wide tables are
 assembled in sorted movie order, so they are identical to a serial run. On a cluster, a sharded run
