@@ -1,14 +1,20 @@
 # scripts/
 
-Current pipeline code (to be consolidated into `src/TrainTracks/` in cleanup Phase 3).
-Older single-movie exploration scripts are in `../archive/`.
+Command-line entry points. The processing steps themselves live in `../src/TrainTracks/`; see the root
+`README.md` for the run order, what each step writes and the settings used.
 
-Pipeline: `import_export.py` (nd2 -> zarr) -> `batch_pipeline.py` (detect, flow, candidate
-graph, solve, score, clean, all movies; the steps live in `src/TrainTracks/`:
-`detection.py`, `flow.py`, `tracking.py`, `scoring.py`) -> `track_flow_score.py` (`--gt` calibration)
--> `batch_rescore_tracks.py`, `batch_traccuracy.py` -> `batch_lyso_interaction.py`,
-`batch_puncta_colocalization.py`. Cotracking is in `../cotracking/`.
+| Script | Purpose |
+|---|---|
+| `import_export.py` | convert `.nd2` movies to `.zarr` (next to the `.nd2`) |
+| `batch_pipeline.py` | detect, flow, track, score, clean, for all movies; `--jobs`, `--profile`, `--movie`, `--skip-existing`, `--summarize-only`, SLURM sharding |
+| `batch_traccuracy.py` | recall of raw and clean tracks against `../ground_truth/` |
+| `batch_lyso_interaction.py` | lysosome / mitochondria segmentation and per-track contact features (`--jobs`, `--skip-existing`) |
+| `batch_puncta_colocalization.py` | box-based puncta-organelle correlation per detection |
+| `batch_rescore_tracks.py` | re-score existing tracks with the current scorer (add `--write-clean` to rebuild `tracks_clean.geff`; it rewrites `flow_scores.csv`) |
+| `track_flow_score.py` | single-run scorer plus `--gt` calibration on one movie |
+| `calibrate_cull_on_gt.py` | check the cull cutoff against the validated tracks of all movies |
+| `check_regression.py` | re-run one stage (detection, flow, tracking) and compare with stored output |
+| `compare_runs.py` | compare two complete runs movie by movie (blobs, flow, tracks, scores) |
+| `batch_track_review.py`, `review_lyso_interaction.py`, `straightness_review.py` | napari review tools |
 
-Review tools: `batch_track_review.py`, `review_lyso_interaction.py`,
-`straightness_review.py`. Refactor safety net: `check_regression.py detection|flow|tracking
-<movie_dir>` re-runs a stage and compares with the stored outputs.
+Cotracking scripts are in `../cotracking/`. Retired scripts are in `../archive/`.
