@@ -98,3 +98,10 @@ At the 1.4 cutoff 5 GT tracks (1.7%) are flagged (turns 1.71, 1.53, 1.48, 1.40, 
 1.57 (the random-walk value is about pi/2 = 1.57). Of all 41268 tracks, 31470 have span < 5, 9425 are
 eligible and 6895 flagged (6094 of those above 1.57), leaving 2903 clean tracks with median span 6
 (2467 have span 5-9).
+
+## Leading vs trailing (removed 2026-11-20)
+
+The per-frame leading/trailing analysis (`leading_trailing.py` plus two functions in `cotracking.py`) was
+archived in `archive/leading_trailing_2026-11/`. It gave only a small, inconclusive trailing lean and was
+likely affected by Kalman lag and possible channel-timing offsets. It will be redone as a kymograph
+analysis; do not cite the old numbers.

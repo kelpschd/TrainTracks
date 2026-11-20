@@ -122,7 +122,7 @@ come from different code versions and dates), so instead:
 5. Downstream scripts into `DS/results/`, in this order: `batch_traccuracy.py`, `batch_lyso_interaction.py`,
    `batch_puncta_colocalization.py`, `batch_cotracking.py` (full sorted run: its permutation seeds are
    `1000 + movie index`), then `summarize_cotracking_velocity.py`, `length_matched_speed.py`,
-   `leading_trailing.py`. Give the other batch scripts a `batch_root` default of `results_root` here.
+   (`leading_trailing.py` was dropped 2026-11-20; the leading/trailing question will be redone as a kymograph analysis). Give the other batch scripts a `batch_root` default of `results_root` here.
 6. Compare the headline numbers with the archive (2903 clean tracks; 41268 / 9425 / 6895 tracks /
    eligible / flagged; cotracking 7.6% vs 0.9%, p = 0.029), regenerate figures from `analysis/`.
 `results/` is final only when 3 to 6 agree; the archive stays untouched as the record.
