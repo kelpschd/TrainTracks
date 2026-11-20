@@ -15,7 +15,7 @@ Tables written to <out>/summary/ :
     paired_summary.csv        cluster-bootstrap mean paired delta, by organelle/class
     event_aligned_speed.csv   speed vs frame relative to episode onset
     episodes_all.csv          every episode, with movie/group
-Figure: cotracking_velocity.png
+(No figures: the plots are made in the analysis qmd, so that all figures come from R.)
 
 Usage:  python summarize_cotracking_velocity.py /path/to/cotracking [--min-steps 2]
 """
@@ -227,51 +227,6 @@ def aligned_table(data):
 
 
 # ---------------------------------------------------------------------------
-# figure
-# ---------------------------------------------------------------------------
-def make_figure(out, ts, paired, aligned, ep_lys):
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    fig, ax = plt.subplots(1, 4, figsize=(19, 4.6))
-
-    t = ts[ts.organelle == "lysosome"]
-    data = [t[t.cotracks == 0].mean_speed.dropna(), t[t.cotracks == 1].mean_speed.dropna()]
-    ax[0].boxplot(data, showfliers=False)
-    ax[0].set_xticks([1, 2]); ax[0].set_xticklabels([f"never\n(n={len(data[0])})", f"cotracks\n(n={len(data[1])})"])
-    for i, d in enumerate(data):
-        ax[0].scatter(np.random.default_rng(1).normal(i + 1, .05, len(d)), d, s=10, alpha=.5)
-    ax[0].set_ylabel("track mean speed (px/frame)"); ax[0].set_title("Lysosome: cotracking vs never")
-
-    pl = paired[(paired.get("organelle") == "lysosome") & (paired.get("episode_class") == "all")] if len(paired) else paired
-    if len(pl):
-        for _, r in pl.iterrows():
-            ax[1].plot([0, 1], [r.speed_outside, r.speed_during], "-o", color="gray", alpha=.5, ms=3)
-        ax[1].set_xticks([0, 1]); ax[1].set_xticklabels(["outside", "during"])
-        ax[1].set_ylabel("speed (px/frame)"); ax[1].set_title(f"Within-track paired (n={len(pl)} tracks)")
-    else:
-        ax[1].text(.5, .5, "no paired tracks", ha="center"); ax[1].set_axis_off()
-
-    if len(aligned):
-        al = aligned[aligned.organelle == "lysosome"]
-        for cls, g in al.groupby("episode_class"):
-            m = g.groupby("rel_frame").speed.agg(["mean", "sem", "size"])
-            m = m[m["size"] >= 3]
-            ax[2].errorbar(m.index, m["mean"], yerr=m["sem"], marker="o", ms=3, capsize=2, label=f"{cls}")
-        ax[2].axvline(0, color="k", ls=":")
-        ax[2].set_xlabel("frame relative to cotracking onset"); ax[2].set_ylabel("particle speed (px/frame)")
-        ax[2].set_title("Event-aligned (lysosome)"); ax[2].legend(fontsize=8)
-
-    if len(ep_lys):
-        ax[3].scatter(ep_lys.org_mean_speed, ep_lys.particle_mean_speed, s=18, alpha=.6)
-        lim = np.nanmax([ep_lys.org_mean_speed.max(), ep_lys.particle_mean_speed.max()])
-        ax[3].plot([0, lim], [0, lim], "k:")
-        ax[3].set_xlabel("lysosome speed in episode"); ax[3].set_ylabel("particle speed in episode")
-        ax[3].set_title("Speed match within episodes")
-    fig.tight_layout(); fig.savefig(out / "cotracking_velocity.png", dpi=150); plt.close(fig)
-
-
-# ---------------------------------------------------------------------------
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("root", type=Path)
@@ -316,8 +271,7 @@ def main():
     al = aligned_table(data)
     if len(al):
         al.to_csv(out / "event_aligned_speed.csv", index=False)
-    make_figure(out, ts, paired, al, data["ep"]["lysosome"])
-    print(f"Wrote tables and cotracking_velocity.png to {out}")
+    print(f"Wrote tables to {out}")
 
 
 if __name__ == "__main__":

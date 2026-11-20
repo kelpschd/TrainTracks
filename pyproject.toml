@@ -35,7 +35,6 @@ dependencies = [
     "Pillow",
     "ome-zarr",
     "dask",
-    "matplotlib",
     "traccuracy>=0.4.3,<0.5",
     "trackpy",
     "filterpy",

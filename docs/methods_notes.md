@@ -110,3 +110,10 @@ analysis; do not cite the old numbers.
 
 `length_matched_speed.py` is archived (`archive/length_matched_speed_2026-11/`); the length-matched comparison
 of cotracking vs never-cotracking track speed is computed in the analysis `.qmd`.
+
+## Cotracking summary tables (no figures, 2026-11-20)
+
+`cotracking/summarize_cotracking_velocity.py` writes only tables to `<cotracking>/summary/` (the analysis qmd
+reads `track_speed.csv`, `episodes_all.csv`, `paired_during_vs_outside.csv`, `event_aligned_speed.csv` and
+`enrichment.csv`). It no longer draws `cotracking_velocity.png`: all figures are made in the qmd so they are
+consistent. The table contents are unchanged (checked byte for byte against the previous output).
