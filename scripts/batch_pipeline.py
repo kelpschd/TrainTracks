@@ -61,7 +61,7 @@ from TrainTracks.config import load_paths, to_relative
 from TrainTracks.detection import run_detection
 from TrainTracks.flow import compute_optical_flow, write_flow_zarr
 from TrainTracks.parallel import run_jobs, shard, shard_from_env
-from TrainTracks.resources import resolve_resources
+from TrainTracks.resources import peak_rss_gb, resolve_resources
 from TrainTracks.tracking import (
     annotate_solution_track_ids, run_tracking, solution_to_track_df, track_metrics,
 )
@@ -212,16 +212,6 @@ class _Stopwatch:
         now = time.perf_counter()
         self.laps[name] = round(now - self.t, 2)
         self.t = now
-
-
-def _peak_rss_gb() -> float | None:
-    """Peak resident memory of this process (GB). In a pool, each movie runs in a fresh process."""
-    try:
-        import resource
-    except ImportError:  # not available on Windows
-        return None
-    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    return round(peak / 1024**3 if sys.platform == "darwin" else peak / 1024**2, 2)  # bytes on macOS, KB on Linux
 
 
 def movie_id_of(movie_path: Path) -> str:
@@ -403,7 +393,7 @@ def process_movie(
             "tracking_solve_s": cand_stats["seconds_solve"],
             "total_s": round(time.perf_counter() - t_start, 2),
         },
-        "peak_rss_gb": _peak_rss_gb(),
+        "peak_rss_gb": peak_rss_gb(),
     }
     write_json(metadata_json, record)
     # Complete: swap the finished folder into place (the old one, if any, is removed only now).

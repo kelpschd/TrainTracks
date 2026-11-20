@@ -31,6 +31,7 @@ Usage:
     python batch_lyso_interaction.py /path/to/raw_data/tracking_batch
     python batch_lyso_interaction.py /path/to/tracking_batch --movie sg100_Well1_1003
     python batch_lyso_interaction.py /path/to/tracking_batch --skip-existing   # resume an interrupted batch
+    python batch_lyso_interaction.py /path/to/tracking_batch --jobs 4          # 4 movies at once (or --jobs auto)
     python batch_lyso_interaction.py /path/to/tracking_batch --raw-root /path/to/raw_data
     python batch_lyso_interaction.py /path/to/tracking_batch --strict
 """
@@ -39,13 +40,14 @@ from __future__ import annotations
 
 import argparse
 import json
-import traceback
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import zarr
 from TrainTracks.config import resolve_input_zarr
+from TrainTracks.parallel import run_jobs, shard, shard_from_env
+from TrainTracks.resources import peak_rss_gb, resolve_resources
 from TrainTracks.tracks_io import geff_to_track_df  # noqa: F401  (re-exported for B.geff_to_track_df users)
 from scipy import ndimage as ndi
 from scipy.ndimage import distance_transform_edt, gaussian_laplace
@@ -406,6 +408,18 @@ def process_movie(movie_dir: Path, raw_root: Path | None, out_subdir: str) -> di
 # ============================================================================
 
 
+def _movie_job(job: dict) -> dict:
+    """Worker entry point (module level so a spawn-based process pool can import it)."""
+    print("=" * 72)
+    print(f"MOVIE: {job['id']}")
+    print("=" * 72, flush=True)
+    res = process_movie(
+        Path(job["movie_dir"]), Path(job["raw_root"]) if job["raw_root"] else None, job["out_subdir"]
+    )
+    res["peak_rss_gb"] = peak_rss_gb()
+    return res
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Batch lysosome/mitochondria interaction analysis for tracks_clean.geff."
@@ -418,6 +432,22 @@ def main():
                         help="Per-movie output subdir name (default: organelle)")
     parser.add_argument("--strict", action="store_true", help="Stop on first error")
     parser.add_argument(
+        "--jobs", default="1",
+        help="Movies to segment at once: an integer or 'auto' (default 1). Each movie is single-threaded "
+             "and memory-bound, so 'auto' sizes by cores and --mem-per-job-gb",
+    )
+    parser.add_argument("--mem-per-job-gb", type=float, default=None,
+                        help="memory estimate per movie used by --jobs auto (default 6; the peak of each "
+                             "movie is printed so this can be tightened)")
+    parser.add_argument("--log-dir", type=Path, default=None,
+                        help="per-movie logs when --jobs > 1 (default: <batch_root>/logs)")
+    parser.add_argument("--task-index", type=int, default=None, help="This task's shard index (cluster job arrays)")
+    parser.add_argument("--num-tasks", type=int, default=None,
+                        help="Total shards (cluster job arrays; also read from SLURM_ARRAY_*). A sharded run writes "
+                             "per-movie outputs only; combine afterwards with --skip-existing")
+    parser.add_argument("--batch-dir", type=Path, default=None,
+                        help="where the batch-wide tables and params are written (default: batch_root)")
+    parser.add_argument(
         "--skip-existing", action="store_true",
         help="Resume: reuse the per-movie outputs of movies that are already complete "
              "(all three files written) instead of re-segmenting them",
@@ -426,6 +456,8 @@ def main():
 
     batch_root = args.batch_root.expanduser().resolve()
     raw_root = args.raw_root.expanduser().resolve() if args.raw_root else None
+    batch_dir = args.batch_dir.expanduser().resolve() if args.batch_dir else batch_root
+    batch_dir.mkdir(parents=True, exist_ok=True)
 
     if not batch_root.is_dir():
         raise FileNotFoundError(f"Batch root not found: {batch_root}")
@@ -439,53 +471,79 @@ def main():
         movie_dirs = [p for p in movie_dirs if p.name in requested]
     if not movie_dirs:
         raise FileNotFoundError(f"No movie dirs with tracks_clean.geff in {batch_root}")
+    n_total = len(movie_dirs)
+    index, count = (args.task_index or 0, args.num_tasks) if args.num_tasks is not None else shard_from_env()
+    if count > 1:
+        movie_dirs = shard(movie_dirs, index, count)
+        if not movie_dirs:
+            raise FileNotFoundError(f"shard {index}/{count} has no movies")
+    resources = resolve_resources(
+        jobs=args.jobs, threads_per_job=1,
+        mem_per_job_gb=args.mem_per_job_gb if args.mem_per_job_gb is not None else 6.0,
+        min_threads_per_job=1,
+    )
+    jobs = min(resources.jobs, len(movie_dirs))
 
     print(f"Batch root : {batch_root}")
-    print(f"Movies     : {len(movie_dirs)}")
+    print(f"Movies     : {len(movie_dirs)}" + (f" of {n_total} (shard {index + 1}/{count})" if count > 1 else ""))
+    print(f"Parallel   : {jobs} movie(s) at once")
     print(f"Channels   : puncta={PUNCTA_CHANNEL} lyso={LYSOSOME_CHANNEL} "
           f"mito={MITOCHONDRIA_CHANNEL} (BFP ch3 ignored)")
     print("Distances in PIXELS.\n")
 
-    all_det = []
-    all_tracks = []
     errors = []
+    frames: dict[str, tuple] = {}   # movie -> (detections, tracks); assembled in sorted movie order below
 
+    todo = []
     for movie_dir in movie_dirs:
-        print("=" * 72)
-        print(f"MOVIE: {movie_dir.name}")
-        print("=" * 72)
         out_dir = movie_dir / args.out_subdir
         # mask_area_log.csv is written last by process_movie, so all three files present = complete
         done = [out_dir / f for f in ("detections_organelle.csv", "tracks_organelle.csv", "mask_area_log.csv")]
         if args.skip_existing and all(f.exists() for f in done):
-            all_det.append(pd.read_csv(done[0]))
-            all_tracks.append(pd.read_csv(done[1]))
-            print("  already complete: reusing existing per-movie outputs")
-            continue
-        try:
-            res = process_movie(movie_dir, raw_root, args.out_subdir)
-            all_det.append(res.pop("_det_df"))
-            all_tracks.append(res.pop("_track_df"))
-            print(f"  tracks={res['n_tracks']} detections={res['n_detections']} "
-                  f"frames={res['n_frames']}")
-            print(f"  wrote {res['tracks_csv']}")
-        except Exception as exc:
-            errors.append({
-                "movie": movie_dir.name,
-                "error": str(exc),
-                "traceback": traceback.format_exc(),
-            })
-            print(f"  ERROR: {exc}")
-            if args.strict:
-                raise
+            frames[movie_dir.name] = (pd.read_csv(done[0]), pd.read_csv(done[1]))
+            print(f"{movie_dir.name}: already complete, reusing existing per-movie outputs")
+        else:
+            todo.append({"id": movie_dir.name, "movie_dir": str(movie_dir),
+                         "raw_root": str(raw_root) if raw_root else None, "out_subdir": args.out_subdir})
+
+    def on_done(r, n_done, n_total_jobs):
+        if r.ok:
+            print(f"[{n_done}/{n_total_jobs}] {r.item['id']}: ok in {r.seconds:.0f}s | tracks={r.value['n_tracks']} "
+                  f"detections={r.value['n_detections']} | peak {r.value['peak_rss_gb']} GB", flush=True)
+        else:
+            print(f"[{n_done}/{n_total_jobs}] {r.item['id']}: FAILED ({r.error})", flush=True)
+
+    results = run_jobs(
+        _movie_job, todo, jobs=jobs,
+        threads_per_job=1 if jobs > 1 else None,   # a serial run keeps the library defaults, as before
+        log_dir=(args.log_dir or batch_root / "logs") if jobs > 1 else None,
+        name_of=lambda j: f"organelle_{j['id']}",
+        stop_on_error=args.strict, on_done=on_done,
+    )
+    for r in results:
+        if r.ok:
+            frames[r.item["id"]] = (r.value.pop("_det_df"), r.value.pop("_track_df"))
+        else:
+            errors.append({"movie": r.item["id"], "error": r.error, "traceback": r.traceback})
+    if args.strict and errors:
+        raise RuntimeError(f"{errors[0]['movie']}: {errors[0]['error']}")
+
+    ordered = [frames[m.name] for m in movie_dirs if m.name in frames]   # same order as a serial run
+    all_det = [d for d, _ in ordered]
+    all_tracks = [t_ for _, t_ in ordered]
+
+    if count > 1:
+        print(f"\nShard {index + 1}/{count} done: {len(all_tracks)} succeeded, {len(errors)} failed. "
+              "Batch-wide tables are not written by a shard; run once with --skip-existing to combine.")
+        return 1 if errors else 0
 
     # Concatenated batch outputs.
     if all_det:
         pd.concat(all_det, ignore_index=True).to_csv(
-            batch_root / "organelle_interaction_detections.csv", index=False)
+            batch_dir / "organelle_interaction_detections.csv", index=False)
     if all_tracks:
         pd.concat(all_tracks, ignore_index=True).to_csv(
-            batch_root / "organelle_interaction_tracks.csv", index=False)
+            batch_dir / "organelle_interaction_tracks.csv", index=False)
 
     # Record every parameter that shaped the output.
     params = {
@@ -502,19 +560,19 @@ def main():
         "n_movies_processed": len(all_tracks),
         "n_movies_failed": len(errors),
     }
-    (batch_root / "organelle_interaction_params.json").write_text(
+    (batch_dir / "organelle_interaction_params.json").write_text(
         json.dumps(params, indent=2, default=str))
 
     if errors:
         pd.DataFrame(errors).to_csv(
-            batch_root / "organelle_interaction_errors.csv", index=False)
+            batch_dir / "organelle_interaction_errors.csv", index=False)
         print(f"\n{len(errors)} movie(s) failed; see organelle_interaction_errors.csv")
 
     print(f"\nDone: {len(all_tracks)} succeeded, {len(errors)} failed, "
           f"{len(movie_dirs)} total")
     print(f"Batch tables:")
-    print(f"  {batch_root / 'organelle_interaction_detections.csv'}")
-    print(f"  {batch_root / 'organelle_interaction_tracks.csv'}")
+    print(f"  {batch_dir / 'organelle_interaction_detections.csv'}")
+    print(f"  {batch_dir / 'organelle_interaction_tracks.csv'}")
 
 
 if __name__ == "__main__":

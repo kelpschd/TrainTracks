@@ -1,5 +1,5 @@
 """Tests for TrainTracks.resources (resolution order, auto sizing, SLURM environment)."""
-from TrainTracks.resources import Hardware, auto_jobs, estimated_mem_gb, resolve_resources
+from TrainTracks.resources import Hardware, auto_jobs, estimated_mem_gb, peak_rss_gb, resolve_resources
 
 HW = Hardware(logical_cores=12, performance_cores=8, memory_gb=32.0)  # the 12-core / 32 GB Mac
 
@@ -63,3 +63,15 @@ def test_bad_jobs_value_is_rejected():
     except ValueError:
         return
     raise AssertionError("expected ValueError")
+
+
+def test_single_threaded_jobs_are_limited_by_memory_not_cores():
+    # the segmentation script: 1 thread per movie, 6 GB pinned -> 4 jobs fit in 0.75 * 32 GB, though 8 cores are free
+    r = _res(jobs="auto", threads_per_job=1, mem_per_job_gb=6.0, min_threads_per_job=1)
+    assert (r.jobs, r.threads_per_job) == (4, 1)
+    assert _res(jobs="auto", threads_per_job=1, mem_per_job_gb=2.0, min_threads_per_job=1).jobs == 8  # all performance cores
+
+
+def test_peak_rss_is_a_positive_number_of_gb():
+    v = peak_rss_gb()
+    assert v is None or 0.0 < v < 1024.0

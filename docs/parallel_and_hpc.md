@@ -35,6 +35,20 @@ once beats more threads per movie, and memory (not cores) was what limited `--jo
 With `--jobs > 1` each movie runs in a fresh process, its output goes to `<output>/logs/<movie>.log`,
 and one progress line per finished movie is printed. A failed movie does not stop the others.
 
+## The segmentation script (`batch_lyso_interaction.py`)
+
+```bash
+python scripts/batch_lyso_interaction.py "$DS/results" --jobs 4              # 4 movies at once (or --jobs auto)
+python scripts/batch_lyso_interaction.py "$DS/results" --skip-existing       # resume, or combine after shards
+```
+Each movie is single-threaded and memory-bound (about 157 s per movie serially on the 12-core Mac), so `--jobs`
+scales with the number of movies at once. `--jobs auto` uses the performance cores and `--mem-per-job-gb`
+(default 6, a conservative guess until measured: each movie's peak memory is printed when it finishes).
+With `--jobs > 1` per-movie logs go to `<batch_root>/logs/organelle_<movie>.log`. The batch-wide tables are
+assembled in sorted movie order, so they are identical to a serial run. On a cluster, a sharded run
+(`--task-index/--num-tasks`, or SLURM array variables) writes per-movie outputs only; run once more with
+`--skip-existing` to combine them. `--batch-dir` redirects the batch-wide tables (useful for tests).
+
 ## Crash safety
 
 A movie is written to `<movie>.partial` and renamed to `<movie>` only when complete. A killed or

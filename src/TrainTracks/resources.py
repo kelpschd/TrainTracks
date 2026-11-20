@@ -147,6 +147,7 @@ def resolve_resources(
     hardware: Hardware | None = None,
     env: dict | None = None,
     toml_data: dict | None = None,
+    min_threads_per_job: int = MIN_THREADS_PER_JOB,
 ) -> Resources:
     """Resolve ``Resources`` (see module docstring for the priority order)."""
     env = os.environ if env is None else env
@@ -171,7 +172,7 @@ def resolve_resources(
     if n_jobs is None:
         n_jobs = _parse_jobs(table.get("jobs"))
     if n_jobs is None:
-        n_jobs = auto_jobs(hw, pinned)
+        n_jobs = auto_jobs(hw, pinned, min_threads=min_threads_per_job)
 
     threads = threads_per_job
     if threads is None and env.get("SLURM_CPUS_PER_TASK"):
@@ -182,6 +183,16 @@ def resolve_resources(
         threads = max(1, hw.performance_cores // n_jobs)
     mem = pinned if pinned is not None else estimated_mem_gb(int(threads))
     return Resources(jobs=n_jobs, threads_per_job=int(threads), mem_per_job_gb=round(mem, 2))
+
+
+def peak_rss_gb() -> float | None:
+    """Peak resident memory of this process in GB (None where unavailable, e.g. Windows)."""
+    try:
+        import resource
+    except ImportError:
+        return None
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return round(peak / 1024**3 if sys.platform == "darwin" else peak / 1024**2, 2)  # bytes on macOS, KB on Linux
 
 
 def apply_thread_limits(threads: int) -> None:
