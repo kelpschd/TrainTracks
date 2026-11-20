@@ -142,7 +142,8 @@ Items in a tier are roughly ordered; tiers are not.
       2026-11-20). `batch_lyso_interaction.py` DONE in code 2026-11-20 (`--jobs`, sharding, `--skip-existing`,
       `--batch-dir`). VERIFIED 2026-11-20: 4 movies with `--jobs 4` took 3 min 0 s (about 10.5 min of work done in
       parallel; user CPU 10 min 28 s), outputs byte-identical to the serial run (`cmp`).
-      Still to do: `batch_puncta_colocalization.py`, `batch_cotracking.py` (also parallel over its permutations). Use `TrainTracks.parallel.run_jobs` + `TrainTracks.resources` like `batch_pipeline.py`;
+      `batch_puncta_colocalization.py` and `batch_cotracking.py` (also parallel over its permutations) are
+      deferred: the user decided on 2026-11-20 that they are fine as they are for now. Use `TrainTracks.parallel.run_jobs` + `TrainTracks.resources` like `batch_pipeline.py`;
       verify `--jobs 1` vs `--jobs N` give identical per-movie outputs; SLURM-array friendly.
 - [ ] **Add one end-to-end smoke test** on a small synthetic movie with known
       tracks (detect -> flow -> solve -> score -> clean -> traccuracy).

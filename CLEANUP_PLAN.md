@@ -40,7 +40,7 @@ TrainTracks/
   pipeline/              thin CLI entry points, in run order
     01_import_export.py  02_detect.py  03_flow.py  04_track.py
     05_score_clean.py    06_validate_traccuracy.py  07_organelle.py  08_cotracking.py
-  analysis/              analysis_20261026.qmd -> analysis.qmd, cotracking_section.qmd
+  analysis/              analysis_20261026.qmd -> analysis.qmd (cotracking_section.qmd was removed 2026-11-20: its content is in the main qmd)
   review/                napari/diagnostic viewers (batch_track_review, review_lyso_interaction, ...)
   ground_truth/          sg100_Well5_1018_valid_tracks.csv + short README (11 tracks, hand-annotated)
   tests/                 one synthetic end-to-end smoke test
@@ -54,7 +54,7 @@ TrainTracks/
 ```
 
 ## Status
-Update 2026-11-20: fresh run into DS/results done and verified against the archive (pipeline, traccuracy, organelle, coloc, cotracking summaries). README rewritten (run order, settings, checks, layout). Environment: `environment.yml`, `requirements-lock.txt` (full freeze) and the missing dependencies (traccuracy, dask, matplotlib, trackpy, filterpy) added to `pyproject.toml` on 2026-11-20. Remaining: `--jobs` for puncta/cotracking, analysis qmd paths (user will do later), kymograph analysis (user), second pass over `notebooks/` placeholder and `cotracking/cotracking_section.qmd`.
+Update 2026-11-20: fresh run into DS/results done and verified against the archive (pipeline, traccuracy, organelle, coloc, cotracking summaries). README rewritten (run order, settings, checks, layout). Environment: `environment.yml`, `requirements-lock.txt` (full freeze) and the missing dependencies (traccuracy, dask, matplotlib, trackpy, filterpy) added to `pyproject.toml` on 2026-11-20. Remaining: `--jobs` for puncta/cotracking, analysis qmd paths (user will do later), kymograph analysis (user), `notebooks/` is kept (user may use it later); `cotracking/cotracking_section.qmd` removed (redundant); `--jobs` for puncta/cotracking deferred by the user.
 Phase 0, 1, 2 done (2026-11-19). Phase 3 in progress:
 - 3.1 done: `src/TrainTracks/ids.py` and `tracks_io.py` replace 5 copies of
   `geff_to_track_df` and 3 of the uid helpers (behaviour-identical; see tests/).
