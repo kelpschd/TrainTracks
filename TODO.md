@@ -138,6 +138,11 @@ Items in a tier are roughly ordered; tiers are not.
       (detection holds one frame's arrays per thread); auto sizing now models that, giving 4 jobs x 2
       threads on the 12-core/32 GB Mac. Flow (47-50 s) is single-threaded at any thread count: candidate
       for a per-frame-pair parallel flow later; detection takes 61 s at 2 threads.
+- [ ] **Add `--jobs` (and `--skip-existing`/sharding) to the downstream batch scripts** (user request
+      2026-11-20, to do after the analysis is verified): `batch_lyso_interaction.py` (157 s/movie serial,
+      has `--skip-existing` only), `batch_puncta_colocalization.py`, `batch_cotracking.py` (also parallel over
+      its permutations). Use `TrainTracks.parallel.run_jobs` + `TrainTracks.resources` like `batch_pipeline.py`;
+      verify `--jobs 1` vs `--jobs N` give identical per-movie outputs; SLURM-array friendly.
 - [ ] **Add one end-to-end smoke test** on a small synthetic movie with known
       tracks (detect -> flow -> solve -> score -> clean -> traccuracy).
       Would have caught every Tier 1 item.
